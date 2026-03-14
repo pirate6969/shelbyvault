@@ -73,6 +73,7 @@ export default function Navbar() {
           { label: "About", href: "/about" },
           { label: "FAQ", href: "/faq" },
           { label: "My Vault", href: "/vault" },
+          { label: "Profile", href: account ? `/profile/${account.address.toString()}` : "/profile" },
           { label: "Marketplace", href: "/marketplace" },
         ].map((link) => (
           <Link

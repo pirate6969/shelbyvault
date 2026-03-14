@@ -2,66 +2,55 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
-const FILE = path.join(process.cwd(), "data", "assets.json");
+const ASSETS_FILE  = path.join(process.cwd(), "data", "assets.json");
+const PROFILE_FILE = path.join(process.cwd(), "data", "profiles.json");
 
-const read = () => {
-  if (!fs.existsSync(FILE)) return [];
-  return JSON.parse(fs.readFileSync(FILE, "utf-8"));
-};
-
-const write = (data: any) => {
-  fs.writeFileSync(FILE, JSON.stringify(data, null, 2));
-};
+const readAssets  = () => fs.existsSync(ASSETS_FILE)  ? JSON.parse(fs.readFileSync(ASSETS_FILE,  "utf-8")) : [];
+const readProfiles= () => fs.existsSync(PROFILE_FILE) ? JSON.parse(fs.readFileSync(PROFILE_FILE, "utf-8")) : {};
+const writeAssets = (d: any) => fs.writeFileSync(ASSETS_FILE, JSON.stringify(d, null, 2));
 
 export async function POST(req: NextRequest) {
-  const { id, buyer, txHash } = await req.json();
+  const { id, owner: buyerAddress, txHash } = await req.json();
 
-  if (!id || !buyer || !txHash) {
-    return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-  }
-
-  const data = read();
-  const idx = data.findIndex((a: any) => a.id === id);
+  const data = readAssets();
+  const idx  = data.findIndex((a: any) => a.id === id);
   if (idx === -1) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   const asset = data[idx];
 
-  // Can't buy your own asset
-  if (asset.owner === buyer) {
-    return NextResponse.json({ error: "You own this asset" }, { status: 400 });
-  }
-
-  // Must be listed
-  if (!asset.listed) {
-    return NextResponse.json({ error: "Not listed" }, { status: 400 });
-  }
-
-  const supply = asset.supply ?? 1;
-  const sold   = asset.sold   ?? 0;
-
-  // Check sold out
-  if (sold >= supply) {
+  // Already sold out?
+  if ((asset.sold ?? 0) >= (asset.supply ?? 1)) {
     return NextResponse.json({ error: "Sold out" }, { status: 400 });
   }
 
-  const newSold = sold + 1;
-  const allSoldOut = newSold >= supply;
+  // Build buy record
+  const buyRecord = {
+    buyer:     buyerAddress,
+    txHash:    txHash ?? "",
+    price:     asset.price,
+    currency:  "APT",
+    boughtAt:  new Date().toISOString(),
+  };
 
-  // Track buyers list (multiple buyers possible for supply > 1)
-  const buyers: string[] = asset.buyers ?? [];
-  buyers.push(buyer);
+  // Append to buyHistory
+  if (!Array.isArray(asset.buyHistory)) asset.buyHistory = [];
+  asset.buyHistory.push(buyRecord);
 
-  // Update asset — owner stays as ORIGINAL seller, only track buyers separately
-  data[idx].sold      = newSold;
-  data[idx].listed    = !allSoldOut; // delist only when fully sold out
-  data[idx].buyers    = buyers;
-  data[idx].buyTxHash = txHash;
+  // Keep legacy buyers[] as well
+  if (!Array.isArray(asset.buyers)) asset.buyers = [];
+  asset.buyers.push(buyerAddress);
 
-  // Only transfer ownership if supply is 1 (1/1 NFT)
-  if (supply === 1) {
-    data[idx].owner = buyer;
+  // Increment sold count
+  asset.sold = (asset.sold ?? 0) + 1;
+
+  // Transfer ownership if supply === 1 (single edition)
+  if ((asset.supply ?? 1) === 1) {
+    asset.owner  = buyerAddress;
+    asset.listed = false;
   }
 
-  write(data);
-  return NextResponse.json(data[idx]);
+  data[idx] = asset;
+  writeAssets(data);
+
+  return NextResponse.json({ ok: true, asset });
 }
