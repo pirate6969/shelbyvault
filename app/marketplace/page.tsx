@@ -4,20 +4,329 @@ import { useState, useEffect, useRef } from "react";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import Navbar from "@/components/Navbar";
 
-// ── Token types ───────────────────────────────────────────────────────────────
 const SHELBY_COIN_TYPE = "0x249f5c642a63885ff88a5113b3ba0079840af5a1357706f8c7f3bfc5dd12511f::shelby_usd::ShelbyUSD";
 const APT_COIN_TYPE    = "0x1::aptos_coin::AptosCoin";
 const SHELBY_USD_METADATA = "0x1b18363a9f1fe5e6ebf247daba5cc1c18052bb232efdc4c50f556053922d98e1";
 
 interface Asset {
   id:string; name:string; owner:string; price:number; supply:number; sold:number;
-  fileType:string; shelbyUrl:string; listed:boolean; uploadedAt:string; likes:string[];
+  fileType:string; shelbyUrl:string; thumbnailUrl?:string; listed:boolean; uploadedAt:string; likes:string[];
   listTxHash?:string; description?:string; listedAt?:string; buyers?:string[]; uploader?:string;
-  currency?:string; // ← stored currency when listed
+  currency?:string;
   buyHistory?:{buyer:string;txHash:string;price:number;currency:string;boughtAt:string}[];
 }
 interface LiveToken { symbol:string; name:string; price:number; change24h:number; icon:string; }
 type SortOption = "default"|"price_low"|"price_high"|"most_liked";
+
+// ── VIDEO THUMBNAIL ────────────────────────────────────────────────────────────
+function VideoThumbnail({ src, thumbnailUrl }: { src: string; thumbnailUrl?: string }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (thumbnailUrl) { setLoaded(true); return; }
+    const video = document.createElement("video");
+    video.crossOrigin = "anonymous";
+    video.muted = true;
+    video.preload = "metadata";
+    video.src = src;
+    video.currentTime = 1;
+    video.addEventListener("seeked", () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      canvas.width = video.videoWidth || 320;
+      canvas.height = video.videoHeight || 180;
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setLoaded(true);
+      video.remove();
+    });
+    video.load();
+  }, [src, thumbnailUrl]);
+
+  if (thumbnailUrl) return (
+    <div style={{width:"100%",height:"100%",position:"relative"}}>
+      <img src={thumbnailUrl} style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.2)"}}>
+        <div style={{width:"44px",height:"44px",borderRadius:"50%",background:"rgba(108,56,255,0.85)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 24px rgba(108,56,255,0.5)"}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{width:"100%",height:"100%",position:"relative",background:"#0d0820"}}>
+      <canvas ref={canvasRef} style={{width:"100%",height:"100%",objectFit:"cover",display:loaded?"block":"none"}}/>
+      {!loaded && <div style={{position:"absolute",inset:0,background:"linear-gradient(135deg,#0d0820,#1a0d38)"}}/>}
+      <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:loaded?"rgba(0,0,0,0.25)":"transparent"}}>
+        <div style={{width:"44px",height:"44px",borderRadius:"50%",background:"rgba(108,56,255,0.85)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 24px rgba(108,56,255,0.5)"}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── VIDEO PLAYER ───────────────────────────────────────────────────────────────
+function VideoPlayer({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [showControls, setShowControls] = useState(true);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.volume = volume;
+    v.loop = true;
+    const onTime = () => setProgress(v.currentTime);
+    const onLoad = () => setDuration(v.duration);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("loadedmetadata", onLoad);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    return () => {
+      v.pause();
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("loadedmetadata", onLoad);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+    };
+  }, []);
+
+  const togglePlay = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) { v.play(); } else { v.pause(); }
+  };
+
+  const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    const val = parseFloat(e.target.value);
+    v.currentTime = val;
+    setProgress(val);
+  };
+
+  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    const val = parseFloat(e.target.value);
+    setVolume(val);
+    if (v) { v.volume = val; v.muted = val === 0; }
+    setMuted(val === 0);
+  };
+
+  const toggleMute = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    const next = !muted;
+    v.muted = next;
+    setMuted(next);
+  };
+
+  const handleFullscreen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (videoRef.current?.requestFullscreen) videoRef.current.requestFullscreen();
+  };
+
+  const handleDownload = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const a = document.createElement("a");
+    a.href = asset.shelbyUrl; a.download = asset.name; a.click();
+  };
+
+  const handleCopyLink = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigator.clipboard.writeText(asset.shelbyUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const fmt = (s: number) => {
+    if (!s || isNaN(s)) return "0:00";
+    return Math.floor(s / 60) + ":" + Math.floor(s % 60).toString().padStart(2, "0");
+  };
+
+  const handleMouseMove = () => {
+    setShowControls(true);
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => { if (playing) setShowControls(false); }, 2800);
+  };
+
+  const pct = duration ? (progress / duration) * 100 : 0;
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{position:"relative",width:"90vw",maxWidth:"960px",background:"#000",borderRadius:"16px",overflow:"hidden",boxShadow:"0 0 80px rgba(108,56,255,0.3)",border:"1px solid rgba(255,255,255,0.08)"}}>
+      <button onClick={onClose} style={{position:"absolute",top:"14px",right:"14px",zIndex:20,width:"34px",height:"34px",borderRadius:"50%",background:"rgba(0,0,0,0.75)",border:"1px solid rgba(255,255,255,0.2)",color:"white",fontSize:"14px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(10px)",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.background="rgba(255,255,255,0.2)"} onMouseOut={e=>e.currentTarget.style.background="rgba(0,0,0,0.75)"}>✕</button>
+      <div style={{position:"relative",cursor:"pointer"}} onMouseMove={handleMouseMove} onClick={togglePlay}>
+        <video ref={videoRef} src={asset.shelbyUrl} loop playsInline preload="auto" style={{width:"100%",maxHeight:"70vh",display:"block",background:"#000"}}/>
+        {!playing && (
+          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.25)",pointerEvents:"none"}}>
+            <div style={{width:"64px",height:"64px",borderRadius:"50%",background:"rgba(108,56,255,0.9)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 40px rgba(108,56,255,0.7)"}}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </div>
+          </div>
+        )}
+        <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(to top,rgba(0,0,0,0.95) 0%,rgba(0,0,0,0.6) 60%,transparent 100%)",opacity:showControls?1:0,transition:"opacity 0.3s",pointerEvents:showControls?"all":"none"}} onClick={e=>e.stopPropagation()}>
+          <div style={{padding:"0 16px",marginBottom:"6px",position:"relative",height:"18px",display:"flex",alignItems:"center"}}>
+            <div style={{position:"absolute",left:"16px",right:"16px",height:"3px",background:"rgba(255,255,255,0.15)",borderRadius:"999px",overflow:"hidden"}}>
+              <div style={{height:"100%",width:pct+"%",background:"linear-gradient(90deg,#6c38ff,#a855f7)",borderRadius:"999px",transition:"width 0.1s linear"}}/>
+            </div>
+            <input type="range" min={0} max={duration||100} step={0.1} value={progress} onChange={seek} style={{position:"absolute",left:"16px",right:"16px",width:"calc(100% - 32px)",height:"18px",opacity:0,cursor:"pointer",margin:0}}/>
+          </div>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px 12px",gap:"12px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:"12px"}}>
+              <button onClick={togglePlay} style={{background:"none",border:"none",color:"white",cursor:"pointer",display:"flex",alignItems:"center",padding:"0",flexShrink:0}}>
+                {playing ? <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="18" height="18" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>}
+              </button>
+              <button onClick={toggleMute} style={{background:"none",border:"none",color:"white",cursor:"pointer",display:"flex",alignItems:"center",padding:"0",flexShrink:0}}>
+                {muted ? <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg> : <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>}
+              </button>
+              <div style={{position:"relative",height:"18px",width:"72px",display:"flex",alignItems:"center"}}>
+                <div style={{position:"absolute",left:0,right:0,height:"3px",background:"rgba(255,255,255,0.15)",borderRadius:"999px",overflow:"hidden"}}>
+                  <div style={{height:"100%",width:((muted?0:volume)*100)+"%",background:"rgba(168,85,247,0.9)",borderRadius:"999px"}}/>
+                </div>
+                <input type="range" min={0} max={1} step={0.02} value={muted?0:volume} onChange={changeVolume} style={{position:"absolute",left:0,right:0,width:"100%",height:"18px",opacity:0,cursor:"pointer",margin:0}}/>
+              </div>
+              <span style={{fontSize:"11px",color:"rgba(255,255,255,0.55)",fontFamily:"monospace",whiteSpace:"nowrap",flexShrink:0}}>{fmt(progress)} / {fmt(duration)}</span>
+            </div>
+            <button onClick={handleFullscreen} style={{background:"none",border:"none",color:"rgba(255,255,255,0.7)",cursor:"pointer",display:"flex",alignItems:"center",padding:"0",flexShrink:0}}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div style={{padding:"13px 18px",background:"#0d0820",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px",flexWrap:"wrap"}}>
+        <p style={{margin:0,fontSize:"13px",fontWeight:700,color:"rgba(255,255,255,0.85)",fontFamily:"'Outfit',sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"55%"}}>{asset.name}</p>
+        <div style={{display:"flex",gap:"8px",alignItems:"center"}}>
+          <button onClick={handleCopyLink} style={{padding:"7px 14px",borderRadius:"8px",background:copied?"rgba(52,211,153,0.15)":"rgba(108,56,255,0.12)",border:copied?"1px solid rgba(52,211,153,0.4)":"1px solid rgba(108,56,255,0.35)",color:copied?"rgba(52,211,153,0.9)":"rgba(160,130,255,0.9)",fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Outfit',sans-serif",transition:"all 0.18s"}}>
+            {copied ? "✓ Copied!" : "⎘ Share Link"}
+          </button>
+          <button onClick={handleDownload} style={{padding:"7px 14px",borderRadius:"8px",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.12)",color:"rgba(255,255,255,0.7)",fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Outfit',sans-serif",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.background="rgba(255,255,255,0.1)"} onMouseOut={e=>e.currentTarget.style.background="rgba(255,255,255,0.05)"}>
+            ↓ Download
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AUDIO PLAYER ───────────────────────────────────────────────────────────────
+function AudioPlayer({ asset, onClose }: { asset: Asset; onClose: () => void }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.volume = volume;
+    a.loop = true;
+    const onTime = () => setProgress(a.currentTime);
+    const onLoad = () => setDuration(a.duration);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    a.addEventListener("timeupdate", onTime);
+    a.addEventListener("loadedmetadata", onLoad);
+    a.addEventListener("play", onPlay);
+    a.addEventListener("pause", onPause);
+    return () => {
+      a.pause();
+      a.removeEventListener("timeupdate", onTime);
+      a.removeEventListener("loadedmetadata", onLoad);
+      a.removeEventListener("play", onPlay);
+      a.removeEventListener("pause", onPause);
+    };
+  }, []);
+
+  const togglePlay = () => { const a = audioRef.current; if (!a) return; if (a.paused) { a.play(); } else { a.pause(); } };
+  const seek = (e: React.ChangeEvent<HTMLInputElement>) => { const a = audioRef.current; if (!a) return; a.currentTime = parseFloat(e.target.value); setProgress(parseFloat(e.target.value)); };
+  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => { const a = audioRef.current; const val = parseFloat(e.target.value); setVolume(val); if (a) { a.volume = val; a.muted = val === 0; } setMuted(val === 0); };
+  const toggleMute = () => { const a = audioRef.current; if (!a) return; a.muted = !muted; setMuted(!muted); };
+  const handleDownload = () => { const el = document.createElement("a"); el.href = asset.shelbyUrl; el.download = asset.name; el.click(); };
+  const handleCopyLink = () => { navigator.clipboard.writeText(asset.shelbyUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const fmt = (s: number) => { if (!s || isNaN(s)) return "0:00"; return Math.floor(s / 60) + ":" + Math.floor(s % 60).toString().padStart(2, "0"); };
+  const pct = duration ? (progress / duration) * 100 : 0;
+
+  return (
+    <div onClick={e => e.stopPropagation()} style={{width:"90vw",maxWidth:"480px",background:"linear-gradient(160deg,#0d0820,#120a28)",borderRadius:"20px",overflow:"hidden",boxShadow:"0 0 80px rgba(108,56,255,0.35)",border:"1px solid rgba(255,255,255,0.08)"}}>
+      <audio ref={audioRef} src={asset.shelbyUrl} loop/>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"16px 18px 0"}}>
+        <span style={{fontSize:"10px",fontWeight:700,letterSpacing:"0.15em",textTransform:"uppercase",color:"rgba(168,85,247,0.6)",fontFamily:"'Outfit',sans-serif"}}>Now Playing</span>
+        <button onClick={onClose} style={{width:"28px",height:"28px",borderRadius:"50%",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.12)",color:"rgba(255,255,255,0.6)",fontSize:"12px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}} onMouseOver={e=>e.currentTarget.style.background="rgba(255,255,255,0.14)"} onMouseOut={e=>e.currentTarget.style.background="rgba(255,255,255,0.06)"}>✕</button>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",alignItems:"center",padding:"28px 24px 20px",gap:"20px"}}>
+        <div style={{width:"160px",height:"160px",borderRadius:"16px",background:"linear-gradient(135deg,rgba(108,56,255,0.3),rgba(168,85,247,0.2),rgba(236,72,153,0.15))",border:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 20px 60px rgba(108,56,255,0.25)",position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 50% 50%,rgba(108,56,255,0.15),transparent 70%)"}}/>
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.7)" strokeWidth="1.2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          {playing && (
+            <div style={{position:"absolute",bottom:"12px",left:"50%",transform:"translateX(-50%)",display:"flex",gap:"3px",alignItems:"flex-end"}}>
+              {[1,2,3,4].map(i => (<div key={i} style={{width:"3px",background:"rgba(168,85,247,0.8)",borderRadius:"2px",height:"8px",animation:`audioBar${i} 0.8s ease-in-out infinite`}}/>))}
+            </div>
+          )}
+        </div>
+        <div style={{textAlign:"center",width:"100%"}}>
+          <p style={{fontSize:"15px",fontWeight:700,color:"rgba(255,255,255,0.9)",margin:"0 0 4px",fontFamily:"'Outfit',sans-serif",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{asset.name.replace(/\.[^/.]+$/, "")}</p>
+          <p style={{fontSize:"11px",color:"rgba(255,255,255,0.28)",margin:0,fontFamily:"'Outfit',sans-serif"}}>ShelbyVault · Shelbynet</p>
+        </div>
+        <div style={{width:"100%"}}>
+          <div style={{position:"relative",height:"4px",background:"rgba(255,255,255,0.08)",borderRadius:"999px",marginBottom:"8px",cursor:"pointer"}}>
+            <div style={{position:"absolute",left:0,top:0,height:"100%",width:pct+"%",background:"linear-gradient(90deg,#6c38ff,#a855f7)",borderRadius:"999px",transition:"width 0.1s"}}/>
+            <input type="range" min={0} max={duration||100} step={0.1} value={progress} onChange={seek} style={{position:"absolute",inset:0,width:"100%",opacity:0,cursor:"pointer",height:"100%"}}/>
+          </div>
+          <div style={{display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontSize:"10px",color:"rgba(255,255,255,0.3)",fontFamily:"monospace"}}>{fmt(progress)}</span>
+            <span style={{fontSize:"10px",color:"rgba(255,255,255,0.3)",fontFamily:"monospace"}}>{fmt(duration)}</span>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:"20px"}}>
+          <button onClick={toggleMute} style={{background:"none",border:"none",color:muted?"rgba(236,72,153,0.7)":"rgba(255,255,255,0.35)",cursor:"pointer",padding:"4px",transition:"color 0.15s"}}>
+            {muted ? <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>}
+          </button>
+          <button onClick={togglePlay} style={{width:"56px",height:"56px",borderRadius:"50%",background:"linear-gradient(135deg,#6c38ff,#a855f7)",border:"none",color:"white",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 28px rgba(108,56,255,0.5)",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.transform="scale(1.06)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}>
+            {playing ? <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> : <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>}
+          </button>
+          <div style={{position:"relative",height:"18px",width:"64px",display:"flex",alignItems:"center"}}>
+            <div style={{position:"absolute",left:0,right:0,height:"3px",background:"rgba(255,255,255,0.12)",borderRadius:"999px",overflow:"hidden"}}>
+              <div style={{height:"100%",width:((muted?0:volume)*100)+"%",background:"rgba(168,85,247,0.9)",borderRadius:"999px"}}/>
+            </div>
+            <input type="range" min={0} max={1} step={0.02} value={muted?0:volume} onChange={changeVolume} style={{position:"absolute",left:0,right:0,width:"100%",height:"18px",opacity:0,cursor:"pointer",margin:0}}/>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:"8px",width:"100%"}}>
+          <button onClick={handleCopyLink} style={{flex:1,padding:"9px",borderRadius:"10px",background:copied?"rgba(52,211,153,0.12)":"rgba(108,56,255,0.1)",border:copied?"1px solid rgba(52,211,153,0.35)":"1px solid rgba(108,56,255,0.3)",color:copied?"rgba(52,211,153,0.9)":"rgba(160,130,255,0.85)",fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Outfit',sans-serif",transition:"all 0.18s"}}>
+            {copied ? "✓ Copied!" : "⎘ Share Link"}
+          </button>
+          <button onClick={handleDownload} style={{flex:1,padding:"9px",borderRadius:"10px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.6)",fontSize:"11px",fontWeight:700,cursor:"pointer",fontFamily:"'Outfit',sans-serif",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.background="rgba(255,255,255,0.09)"} onMouseOut={e=>e.currentTarget.style.background="rgba(255,255,255,0.04)"}>
+            ↓ Download
+          </button>
+        </div>
+      </div>
+      <style>{`
+        @keyframes audioBar1 { 0%,100%{height:4px} 50%{height:14px} }
+        @keyframes audioBar2 { 0%,100%{height:10px} 30%{height:4px} 60%{height:18px} }
+        @keyframes audioBar3 { 0%,100%{height:14px} 40%{height:5px} 70%{height:10px} }
+        @keyframes audioBar4 { 0%,100%{height:6px} 55%{height:16px} }
+      `}</style>
+    </div>
+  );
+}
 
 export default function MarketplacePage() {
   const { account, connected, signAndSubmitTransaction, network } = useWallet();
@@ -38,22 +347,22 @@ export default function MarketplacePage() {
   const [copied,      setCopied]      = useState<string|null>(null);
   const tickerRef = useRef<HTMLDivElement>(null);
 
-  // ── Network detection ─────────────────────────────────────────────────────
   const networkName = network?.name?.toLowerCase() ?? "";
-  const isShelby    = networkName.includes("shelby") ||
-    (!!networkName && !["testnet","mainnet","devnet","localnet"].includes(networkName));
+  const isShelby    = networkName.includes("shelby") || (!!networkName && !["testnet","mainnet","devnet","localnet"].includes(networkName));
   const currency    = isShelby ? "ShelbyUSD" : "$APT";
   const coinType    = isShelby ? SHELBY_COIN_TYPE : APT_COIN_TYPE;
 
-  // ── Get coin type for a specific asset (use stored currency if available) ──
   const getCoinTypeForAsset = (asset: Asset) => {
     if (asset.currency === "ShelbyUSD") return SHELBY_COIN_TYPE;
     if (asset.currency === "$APT" || asset.currency === "APT") return APT_COIN_TYPE;
-    return coinType; // fallback to current network
+    return coinType;
   };
 
-  const getDisplayCurrency = (asset: Asset) =>
-    asset.currency ?? currency;
+  const getDisplayCurrency = (asset: Asset) => asset.currency ?? currency;
+
+  const isVideo = (a: Asset) => a.fileType?.startsWith("video/");
+  const isAudio = (a: Asset) => a.fileType?.startsWith("audio/");
+  const isImage = (a: Asset) => a.fileType?.startsWith("image/");
 
   useEffect(()=>{
     const fetchPrices=async()=>{
@@ -97,59 +406,35 @@ export default function MarketplacePage() {
     setLoading(false);
   };
 
-  // ── BUY — uses the coin type the asset was listed with ───────────────────
   const handleBuy=async(asset:Asset)=>{
     if(!connected||!account) return alert("Connect wallet first!");
     if(asset.owner===account.address.toString()) return alert("You own this asset!");
     if(isSoldOut(asset)) return alert("Sold out!");
-
-    const assetCoinType = getCoinTypeForAsset(asset);
     const assetCurrency = getDisplayCurrency(asset);
-
-    // Warn if wallet network doesn't match asset's listed currency
-    if(assetCurrency==="ShelbyUSD" && !isShelby){
-      return alert("⚠️ This asset is listed in ShelbyUSD.\nPlease switch your wallet to Shelbynet and try again.");
-    }
-    if((assetCurrency==="$APT"||assetCurrency==="APT") && isShelby){
-      return alert("⚠️ This asset is listed in APT.\nPlease switch your wallet to Aptos Testnet and try again.");
-    }
-
+    if(assetCurrency==="ShelbyUSD" && !isShelby) return alert("⚠️ This asset is listed in ShelbyUSD.\nPlease switch your wallet to Shelbynet and try again.");
+    if((assetCurrency==="$APT"||assetCurrency==="APT") && isShelby) return alert("⚠️ This asset is listed in APT.\nPlease switch your wallet to Aptos Testnet and try again.");
     setBuying(asset.id);
     try{
       const octas=Math.floor(asset.price*100_000_000);
       const tx=await signAndSubmitTransaction({
         data: assetCurrency==="ShelbyUSD" ? {
-          // ✅ ShelbyUSD is Fungible Asset
           function:"0x1::primary_fungible_store::transfer",
           typeArguments:["0x1::fungible_asset::Metadata"],
           functionArguments:[SHELBY_USD_METADATA, asset.owner, octas.toString()]
         } : {
-          // ✅ APT is Coin
           function:"0x1::coin::transfer",
           typeArguments:[APT_COIN_TYPE],
           functionArguments:[asset.owner, octas.toString()]
         }
       });
-      await fetch("/api/buy",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          id:asset.id,
-          owner:account.address.toString(),
-          txHash:tx.hash,
-          currency:assetCurrency, // ✅ pass currency to backend
-        })
-      });
+      await fetch("/api/buy",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:asset.id,owner:account.address.toString(),txHash:tx.hash,currency:assetCurrency})});
       setSuccess(asset.id);
       setTimeout(()=>setSuccess(null),3000);
       await fetchAssets();
-    }catch(err:any){
-      alert("Purchase failed: "+(err?.message||"User rejected"));
-    }
+    }catch(err:any){ alert("Purchase failed: "+(err?.message||"User rejected")); }
     setBuying(null);
   };
 
-  // ── DELIST — uses current network coin ───────────────────────────────────
   const handleDelist=async(asset:Asset)=>{
     if(!connected||!account) return;
     setDelisting(asset.id);
@@ -165,19 +450,12 @@ export default function MarketplacePage() {
           functionArguments:[account.address.toString(),"10000"]
         }
       });
-      await fetch("/api/marketplace",{
-        method:"PATCH",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({id:asset.id,owner:account.address.toString(),txHash:tx.hash})
-      });
+      await fetch("/api/marketplace",{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:asset.id,owner:account.address.toString(),txHash:tx.hash})});
       await fetchAssets();
-    }catch(err:any){
-      alert("Delist failed: "+(err?.message||"User rejected"));
-    }
+    }catch(err:any){ alert("Delist failed: "+(err?.message||"User rejected")); }
     setDelisting(null);
   };
 
-  // ── LIKE — uses current network coin ─────────────────────────────────────
   const handleLike=async(asset:Asset,e:React.MouseEvent)=>{
     e.stopPropagation();
     if(!account) return alert("Connect wallet first!");
@@ -194,16 +472,10 @@ export default function MarketplacePage() {
           functionArguments:[account.address.toString(),"10000"]
         }
       });
-      const res=await fetch("/api/likes",{
-        method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({id:asset.id,wallet:account.address.toString(),txHash:tx.hash})
-      });
+      const res=await fetch("/api/likes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:asset.id,wallet:account.address.toString(),txHash:tx.hash})});
       const data=await res.json();
       setAssets(prev=>prev.map(a=>a.id===asset.id?{...a,likes:data.likes}:a));
-    }catch(err:any){
-      alert("Like failed: "+(err?.message||"User rejected"));
-    }
+    }catch(err:any){ alert("Like failed: "+(err?.message||"User rejected")); }
     setLiking(null);
   };
 
@@ -232,37 +504,14 @@ export default function MarketplacePage() {
     .filter(a=>isSoldOut(a)&&(!searchQuery||a.name?.toLowerCase().includes(searchQuery.toLowerCase())))
     .sort((a,b)=>(b.likes?.length??0)-(a.likes?.length??0));
 
-  // ── Network-specific volume ───────────────────────────────────────────────
   const networkCurrency = isShelby ? "ShelbyUSD" : "$APT";
-
-  // For items/floor: use top-level currency if available, else check buyHistory
-  const getAssetCurrencyGuess = (a: Asset): string => {
-    if (a.currency) return a.currency;
-    const hist = a.buyHistory ?? [];
-    for (const bh of hist) {
-      if (bh.currency === "ShelbyUSD") return "ShelbyUSD";
-      if (bh.currency === "APT" || bh.currency === "$APT") return "$APT";
-    }
-    return networkCurrency;
-  };
-
-  // Volume: sum buyHistory by current network currency
   const totalVol = allAssets.reduce((s, a) => {
     const hist = a.buyHistory ?? [];
-    return s + hist
-      .filter(bh => {
-        const c = bh.currency ?? "";
-        return isShelby ? c === "ShelbyUSD" : (c === "APT" || c === "$APT");
-      })
-      .reduce((sum, bh) => sum + (bh.price ?? 0), 0);
+    return s + hist.filter(bh => { const c = bh.currency ?? ""; return isShelby ? c === "ShelbyUSD" : (c === "APT" || c === "$APT"); }).reduce((sum, bh) => sum + (bh.price ?? 0), 0);
   }, 0);
-
-  // Items/Floor: use ALL listed assets (they're already filtered by network via API)
   const networkAssets = assets;
   const totalItems = networkAssets.length;
-  const floorPrice = networkAssets.length
-    ? Math.min(...networkAssets.map(a => a.price))
-    : 0;
+  const floorPrice = networkAssets.length ? Math.min(...networkAssets.map(a => a.price)) : 0;
 
   return (
     <>
@@ -274,49 +523,39 @@ export default function MarketplacePage() {
         @keyframes fadeIn  {from{opacity:0}to{opacity:1}}
         @keyframes slideUp {from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
         @keyframes pulse   {0%,100%{opacity:1}50%{opacity:0.4}}
-
         .mp-root{font-family:'Outfit',sans-serif;background:#06050f;min-height:100vh;color:#fff;overflow-x:hidden;}
-
         .mp-ticker{background:rgba(255,255,255,0.018);border-bottom:1px solid rgba(255,255,255,0.055);height:38px;overflow:hidden;display:flex;align-items:center;}
         .mp-ticker-label{flex-shrink:0;padding:0 14px;border-right:1px solid rgba(255,255,255,0.06);display:flex;align-items:center;gap:6px;height:100%;}
-
         .mp-stat{background:rgba(255,255,255,0.026);border:1px solid rgba(255,255,255,0.055);border-radius:14px;padding:18px 22px;display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px;transition:border-color 0.2s;}
         .mp-stat:hover{border-color:rgba(108,56,255,0.3);}
         .mp-stat-val{font-size:1.3rem;font-weight:800;color:#fff;line-height:1;letter-spacing:-0.02em;}
         .mp-stat-lbl{font-size:10px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.22);}
-
         .mp-sort{padding:7px 16px;border-radius:999px;font-size:12px;font-weight:600;font-family:'Outfit',sans-serif;border:1px solid rgba(255,255,255,0.08);background:transparent;color:rgba(255,255,255,0.35);cursor:pointer;transition:all 0.18s;white-space:nowrap;letter-spacing:0.01em;}
         .mp-sort:hover{color:rgba(255,255,255,0.7);border-color:rgba(255,255,255,0.18);}
         .mp-sort.on{background:rgba(108,56,255,0.14);border-color:rgba(108,56,255,0.45);color:rgba(180,150,255,0.95);}
-
         .mp-search{background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.09);border-radius:10px;padding:9px 14px 9px 36px;color:#fff;font-size:12px;font-family:'Outfit',sans-serif;outline:none;width:210px;transition:all 0.2s;}
         .mp-search:focus{border-color:rgba(108,56,255,0.45);background:rgba(108,56,255,0.04);}
         .mp-search::placeholder{color:rgba(255,255,255,0.2);}
-
         .mp-card{background:rgba(255,255,255,0.028);border:1px solid rgba(255,255,255,0.07);border-radius:18px;overflow:hidden;cursor:pointer;transition:all 0.22s cubic-bezier(0.4,0,0.2,1);animation:fadeUp 0.35s ease both;}
         .mp-card:hover{border-color:rgba(108,56,255,0.45);transform:translateY(-6px);box-shadow:0 28px 60px rgba(0,0,0,0.6),0 0 0 1px rgba(108,56,255,0.12),0 0 40px rgba(108,56,255,0.06);}
-
         .mp-tag{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;backdrop-filter:blur(8px);}
-
         .mp-drow{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.045);}
         .mp-drow:last-child{border-bottom:none;}
-
         .mp-copy{padding:3px 9px;border-radius:6px;background:rgba(108,56,255,0.1);border:1px solid rgba(108,56,255,0.25);color:rgba(180,150,255,0.9);font-size:10px;font-weight:700;cursor:pointer;transition:all 0.15s;white-space:nowrap;font-family:'Outfit',sans-serif;}
         .mp-copy:hover{background:rgba(108,56,255,0.22);}
-
         .mp-buy{width:100%;padding:14px;border-radius:13px;font-weight:700;font-size:14px;color:#fff;border:none;cursor:pointer;transition:all 0.2s;letter-spacing:0.01em;font-family:'Outfit',sans-serif;background:linear-gradient(135deg,#6c38ff,#a855f7,#ec4899);box-shadow:0 4px 22px rgba(108,56,255,0.35);}
         .mp-buy:hover:not(:disabled){box-shadow:0 6px 30px rgba(108,56,255,0.55);transform:translateY(-1px);}
         .mp-buy:disabled{opacity:0.35;cursor:not-allowed;transform:none;}
-
         .mp-overlay{position:fixed;inset:0;z-index:200;background:rgba(0,0,0,0.84);backdrop-filter:blur(18px);display:flex;align-items:center;justify-content:center;padding:16px;animation:fadeIn 0.18s ease;}
         .mp-modal{width:100%;max-width:700px;background:#0e0c1f;border:1px solid rgba(255,255,255,0.07);border-radius:22px;overflow:hidden;box-shadow:0 40px 80px rgba(0,0,0,0.7),0 0 60px rgba(108,56,255,0.08);animation:slideUp 0.22s ease;max-height:90vh;overflow-y:auto;}
-
         .spin{animation:spin 0.8s linear infinite;}
         .lbl{font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.22);}
-
         .network-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.04em;}
         .network-pill.shelby{background:rgba(168,85,247,0.15);border:1px solid rgba(168,85,247,0.35);color:rgba(196,130,252,0.95);}
         .network-pill.aptos{background:rgba(52,211,153,0.1);border:1px solid rgba(52,211,153,0.3);color:rgba(52,211,153,0.9);}
+        .mp-media-thumb{width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0d0820,#1a0d38);position:relative;}
+        .mp-media-icon{width:44px;height:44px;border-radius:50%;background:rgba(108,56,255,0.85);display:flex;align-items:center;justify-content:center;box-shadow:0 0 24px rgba(108,56,255,0.5);position:relative;z-index:1;transition:transform 0.18s;}
+        .mp-card:hover .mp-media-icon{transform:scale(1.1);}
       `}</style>
 
       <main className="mp-root">
@@ -358,21 +597,12 @@ export default function MarketplacePage() {
               <div>
                 <p style={{fontSize:"11px",fontWeight:600,letterSpacing:"0.14em",textTransform:"uppercase",color:"rgba(108,56,255,0.7)",marginBottom:"8px",fontFamily:"'Outfit',sans-serif"}}>ShelbyVault</p>
                 <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:"2.2rem",fontWeight:800,color:"#fff",letterSpacing:"-0.02em",margin:0}}>Marketplace</h1>
-                {/* ✅ Dynamic network label */}
                 <div style={{display:"flex",alignItems:"center",gap:"10px",marginTop:"9px",flexWrap:"wrap"}}>
-                  <span style={{fontSize:"13px",color:"rgba(255,255,255,0.28)",fontFamily:"'Outfit',sans-serif"}}>
-                    Buy & sell using{" "}
-                    <span style={{color:isShelby?"rgba(196,130,252,0.85)":"rgba(52,211,153,0.85)",fontWeight:600}}>
-                      {isShelby?"ShelbyUSD":"$APT"}
-                    </span>{" "}
-                    on {isShelby?"Shelbynet":"Aptos Testnet"}
-                  </span>
-                  {/* Network badge */}
+                  <span style={{fontSize:"13px",color:"rgba(255,255,255,0.28)",fontFamily:"'Outfit',sans-serif"}}>Buy & sell using{" "}<span style={{color:isShelby?"rgba(196,130,252,0.85)":"rgba(52,211,153,0.85)",fontWeight:600}}>{isShelby?"ShelbyUSD":"$APT"}</span>{" "}on {isShelby?"Shelbynet":"Aptos Testnet"}</span>
                   <span className={`network-pill ${isShelby?"shelby":"aptos"}`}>
                     <span style={{width:"5px",height:"5px",borderRadius:"50%",background:isShelby?"rgba(196,130,252,0.9)":"rgba(52,211,153,0.9)",display:"inline-block"}}/>
                     {isShelby?"Shelbynet":"Aptos Testnet"}
                   </span>
-                  {/* APT price (only on Aptos) */}
                   {aptPrice&&!isShelby&&(
                     <div style={{display:"inline-flex",alignItems:"center",gap:"6px",padding:"3px 11px",borderRadius:"999px",background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)"}}>
                       <span style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.9)"}}>$APT</span>
@@ -382,13 +612,12 @@ export default function MarketplacePage() {
                   )}
                 </div>
               </div>
-
               <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
                 {[
-                  {label:"Total Items",  value:totalItems.toString()},
-                  {label:"Volume",       value:totalVol.toFixed(2)+" "+networkCurrency},
-                  {label:"Floor Price",  value:totalItems?floorPrice.toFixed(2)+" "+networkCurrency:"—"},
-                  {label:"Total Likes",  value:networkAssets.reduce((s,a)=>s+likeCount(a),0).toString()},
+                  {label:"Total Items",value:totalItems.toString()},
+                  {label:"Volume",value:totalVol.toFixed(2)+" "+networkCurrency},
+                  {label:"Floor Price",value:totalItems?floorPrice.toFixed(2)+" "+networkCurrency:"—"},
+                  {label:"Total Likes",value:networkAssets.reduce((s,a)=>s+likeCount(a),0).toString()},
                 ].map((s,i)=>(
                   <div key={i} className="mp-stat">
                     <span className="mp-stat-val">{s.value}</span>
@@ -417,14 +646,12 @@ export default function MarketplacePage() {
 
           {!loading&&<p style={{fontSize:"11px",color:"rgba(255,255,255,0.2)",marginBottom:"20px",fontWeight:500,fontFamily:"'Outfit',sans-serif"}}>{filtered.length} item{filtered.length!==1?"s":""}{searchQuery?` for "${searchQuery}"`:""}</p>}
 
-          {/* ── LOADING ── */}
           {loading&&(
             <div style={{display:"flex",justifyContent:"center",padding:"120px 0"}}>
               <span className="spin" style={{width:"34px",height:"34px",border:"2px solid rgba(108,56,255,0.2)",borderTopColor:"#6c38ff",borderRadius:"50%",display:"inline-block"}}/>
             </div>
           )}
 
-          {/* ── EMPTY ── */}
           {!loading&&filtered.length===0&&(
             <div style={{textAlign:"center",padding:"100px 0",border:"1px solid rgba(255,255,255,0.055)",borderRadius:"20px",background:"rgba(255,255,255,0.018)"}}>
               <div style={{fontSize:"42px",marginBottom:"14px"}}>🏪</div>
@@ -440,12 +667,25 @@ export default function MarketplacePage() {
                 const soldOut=isSoldOut(asset);
                 const owner=isOwner(asset);
                 const assetCurrency=getDisplayCurrency(asset);
+                const video=isVideo(asset);
+                const audio=isAudio(asset);
+                const image=isImage(asset);
                 return (
                   <div key={asset.id} className="mp-card" style={{animationDelay:`${idx*0.04}s`}} onClick={()=>setDetailAsset(asset)}>
                     <div style={{position:"relative",aspectRatio:"1",background:"rgba(255,255,255,0.02)",overflow:"hidden"}}>
-                      {asset.fileType?.startsWith("image/")
-                        ? <img src={asset.shelbyUrl} alt={asset.name} style={{width:"100%",height:"100%",objectFit:"cover",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)"}} onMouseOver={e=>e.currentTarget.style.transform="scale(1.07)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}/>
-                        : <div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"36px"}}>🎵</div>}
+
+                      {/* ── THUMBNAIL ── */}
+                      {image && <img src={asset.shelbyUrl} alt={asset.name} style={{width:"100%",height:"100%",objectFit:"cover",transition:"transform 0.4s cubic-bezier(0.4,0,0.2,1)"}} onMouseOver={e=>e.currentTarget.style.transform="scale(1.07)"} onMouseOut={e=>e.currentTarget.style.transform="scale(1)"}/>}
+                      {video && <VideoThumbnail src={asset.shelbyUrl} thumbnailUrl={asset.thumbnailUrl}/>}
+                      {audio && (
+                        <div className="mp-media-thumb">
+                          <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 50% 50%,rgba(108,56,255,0.1),transparent 70%)"}}/>
+                          <div className="mp-media-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                          </div>
+                        </div>
+                      )}
+
                       {soldOut&&<div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.5)"}}/>}
                       <div style={{position:"absolute",top:"10px",left:"10px"}}>
                         {soldOut
@@ -458,7 +698,6 @@ export default function MarketplacePage() {
                         <span style={{fontSize:"11px"}}>{isLiked(asset)?"❤️":"🤍"}</span>
                         <span style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.7)",fontFamily:"'Outfit',sans-serif"}}>{likeCount(asset)}</span>
                       </button>
-                      {/* ✅ Currency badge shows asset's actual currency */}
                       {!soldOut&&<div style={{position:"absolute",bottom:"10px",right:"10px",padding:"4px 10px",borderRadius:"8px",background:"rgba(6,5,15,0.88)",backdropFilter:"blur(8px)",border:"1px solid rgba(108,56,255,0.3)",fontSize:"11px",fontWeight:700,color:"rgba(180,150,255,0.9)",fontFamily:"'Outfit',sans-serif"}}>{asset.price} {assetCurrency}</div>}
                     </div>
                     <div style={{padding:"14px 16px 16px",display:"flex",flexDirection:"column",gap:"11px"}}>
@@ -510,12 +749,22 @@ export default function MarketplacePage() {
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"16px"}}>
                 {soldOutFiltered.map((asset,idx)=>{
                   const assetCurrency=getDisplayCurrency(asset);
+                  const video=isVideo(asset);
+                  const audio=isAudio(asset);
+                  const image=isImage(asset);
                   return(
                     <div key={asset.id} className="mp-card" style={{animationDelay:`${idx*0.04}s`,opacity:0.7}} onClick={()=>setDetailAsset(asset)}>
                       <div style={{position:"relative",aspectRatio:"1",background:"rgba(255,255,255,0.02)",overflow:"hidden"}}>
-                        {asset.fileType?.startsWith("image/")
-                          ?<img src={asset.shelbyUrl} alt={asset.name} style={{width:"100%",height:"100%",objectFit:"cover",filter:"grayscale(30%)"}}/>
-                          :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"36px"}}>🎵</div>}
+                        {image && <img src={asset.shelbyUrl} alt={asset.name} style={{width:"100%",height:"100%",objectFit:"cover",filter:"grayscale(30%)"}}/>}
+                        {video && <VideoThumbnail src={asset.shelbyUrl} thumbnailUrl={asset.thumbnailUrl}/>}
+                        {audio && (
+                          <div className="mp-media-thumb">
+                            <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 50% 50%,rgba(108,56,255,0.1),transparent 70%)"}}/>
+                            <div className="mp-media-icon">
+                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                            </div>
+                          </div>
+                        )}
                         <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.4)"}}/>
                         <div style={{position:"absolute",top:"10px",left:"10px"}}>
                           <div className="mp-tag" style={{background:"rgba(0,0,0,0.65)",border:"1px solid rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.38)"}}>🏆 Sold Out</div>
@@ -540,8 +789,20 @@ export default function MarketplacePage() {
           )}
         </div>
 
-        {/* ── FULLSCREEN PREVIEW ── */}
-        {previewAsset&&(
+        {/* ── VIDEO/AUDIO PREVIEW OVERLAY (from card click in detail) ── */}
+        {previewAsset && isVideo(previewAsset) && (
+          <div style={{position:"fixed",inset:0,zIndex:300,background:"rgba(0,0,0,0.94)",backdropFilter:"blur(22px)",display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}} onClick={()=>setPreviewAsset(null)}>
+            <VideoPlayer asset={previewAsset} onClose={()=>setPreviewAsset(null)}/>
+          </div>
+        )}
+
+        {previewAsset && isAudio(previewAsset) && (
+          <div style={{position:"fixed",inset:0,zIndex:300,background:"rgba(0,0,0,0.94)",backdropFilter:"blur(22px)",display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}} onClick={()=>setPreviewAsset(null)}>
+            <AudioPlayer asset={previewAsset} onClose={()=>setPreviewAsset(null)}/>
+          </div>
+        )}
+
+        {previewAsset && isImage(previewAsset) && (
           <div style={{position:"fixed",inset:0,zIndex:300,background:"rgba(0,0,0,0.94)",backdropFilter:"blur(22px)",display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setPreviewAsset(null)}>
             <button onClick={()=>setPreviewAsset(null)} style={{position:"absolute",top:"22px",right:"22px",width:"38px",height:"38px",borderRadius:"50%",background:"rgba(255,255,255,0.07)",border:"1px solid rgba(255,255,255,0.12)",color:"rgba(255,255,255,0.6)",fontSize:"15px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
             <div onClick={e=>e.stopPropagation()} style={{maxWidth:"80vw",maxHeight:"85vh",borderRadius:"18px",overflow:"hidden",boxShadow:"0 0 80px rgba(108,56,255,0.25)",border:"1px solid rgba(255,255,255,0.07)"}}>
@@ -554,31 +815,50 @@ export default function MarketplacePage() {
         {detailAsset&&(
           <div className="mp-overlay" onClick={e=>{if(e.target===e.currentTarget)setDetailAsset(null);}}>
             <div className="mp-modal">
-              {detailAsset.fileType?.startsWith("image/")&&(
+
+              {/* Image preview */}
+              {isImage(detailAsset)&&(
                 <div style={{position:"relative",aspectRatio:"16/7",overflow:"hidden",cursor:"pointer"}} onClick={()=>{setPreviewAsset(detailAsset);setDetailAsset(null);}}>
                   <img src={detailAsset.shelbyUrl} alt={detailAsset.name} style={{width:"100%",height:"100%",objectFit:"cover"}}/>
                   <div style={{position:"absolute",inset:0,background:"linear-gradient(to top,rgba(14,12,31,1) 0%,transparent 55%)"}}/>
                   <div style={{position:"absolute",bottom:"14px",right:"14px",padding:"5px 11px",borderRadius:"7px",background:"rgba(0,0,0,0.6)",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,0.1)",fontSize:"10px",fontWeight:600,color:"rgba(255,255,255,0.55)",fontFamily:"'Outfit',sans-serif"}}>Click to expand ↗</div>
                 </div>
               )}
+
+              {/* Video preview in modal */}
+              {isVideo(detailAsset)&&(
+                <div style={{position:"relative",background:"#000",overflow:"hidden"}}>
+                  <VideoPlayer asset={detailAsset} onClose={()=>setDetailAsset(null)}/>
+                </div>
+              )}
+
+              {/* Audio player in modal */}
+              {isAudio(detailAsset)&&(
+                <div style={{display:"flex",justifyContent:"center",padding:"24px 24px 0"}}>
+                  <AudioPlayer asset={detailAsset} onClose={()=>setDetailAsset(null)}/>
+                </div>
+              )}
+
               <div style={{padding:"28px"}}>
                 <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",marginBottom:"22px",gap:"12px"}}>
                   <div>
                     <h2 style={{fontFamily:"'Playfair Display',serif",fontWeight:800,fontSize:"1.4rem",color:"#fff",margin:0,letterSpacing:"-0.02em"}}>{detailAsset.name}</h2>
                     {detailAsset.description&&<p style={{fontSize:"13px",color:"rgba(255,255,255,0.32)",marginTop:"6px",lineHeight:1.7,maxWidth:"420px",fontFamily:"'Outfit',sans-serif"}}>{detailAsset.description}</p>}
-                    {/* ✅ Currency badge in modal */}
                     <span className={`network-pill ${detailAssetCurrency==="ShelbyUSD"?"shelby":"aptos"}`} style={{marginTop:"8px",display:"inline-flex"}}>
                       {detailAssetCurrency==="ShelbyUSD"?"🟣 ShelbyUSD":"🟢 APT"}
                     </span>
                   </div>
-                  <button onClick={()=>setDetailAsset(null)} style={{flexShrink:0,width:"34px",height:"34px",borderRadius:"50%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.09)",color:"rgba(255,255,255,0.45)",cursor:"pointer",fontSize:"13px"}}>✕</button>
+                  {/* Hide close button if video/audio already has its own close */}
+                  {isImage(detailAsset)&&(
+                    <button onClick={()=>setDetailAsset(null)} style={{flexShrink:0,width:"34px",height:"34px",borderRadius:"50%",background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.09)",color:"rgba(255,255,255,0.45)",cursor:"pointer",fontSize:"13px"}}>✕</button>
+                  )}
                 </div>
 
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"10px",marginBottom:"22px"}}>
                   {[
-                    {label:"Price",     value:`${detailAsset.price} ${detailAssetCurrency}`, sub:aptPrice&&detailAssetCurrency!=="ShelbyUSD"?`≈ $${(detailAsset.price*aptPrice).toFixed(2)}`:"", color:"rgba(160,130,255,0.95)"},
-                    {label:"Supply",    value:`${detailAsset.sold??0} / ${detailAsset.supply??1}`, sub:"sold / total", color:"rgba(244,114,182,0.9)"},
-                    {label:"Remaining", value:isSoldOut(detailAsset)?"0":remaining(detailAsset).toString(), sub:"editions left", color:isSoldOut(detailAsset)?"#f87171":"#34d399"},
+                    {label:"Price",value:`${detailAsset.price} ${detailAssetCurrency}`,sub:aptPrice&&detailAssetCurrency!=="ShelbyUSD"?`≈ $${(detailAsset.price*aptPrice).toFixed(2)}`:"",color:"rgba(160,130,255,0.95)"},
+                    {label:"Supply",value:`${detailAsset.sold??0} / ${detailAsset.supply??1}`,sub:"sold / total",color:"rgba(244,114,182,0.9)"},
+                    {label:"Remaining",value:isSoldOut(detailAsset)?"0":remaining(detailAsset).toString(),sub:"editions left",color:isSoldOut(detailAsset)?"#f87171":"#34d399"},
                   ].map((s,i)=>(
                     <div key={i} style={{background:"rgba(255,255,255,0.025)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:"12px",padding:"14px 16px"}}>
                       <p className="lbl" style={{marginBottom:"5px"}}>{s.label}</p>
@@ -592,23 +872,22 @@ export default function MarketplacePage() {
                   <div className="mp-drow">
                     <span style={{fontSize:"12px",color:"rgba(255,255,255,0.28)",fontWeight:500,fontFamily:"'Outfit',sans-serif"}}>Seller</span>
                     <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-                      <a href={`/profile/${detailAsset.owner}`} style={{fontSize:"12px",color:"rgba(160,130,255,0.85)",fontFamily:"monospace",textDecoration:"none",letterSpacing:"0.02em"}}
-                        onMouseOver={e=>e.currentTarget.style.color="rgba(196,181,253,1)"} onMouseOut={e=>e.currentTarget.style.color="rgba(160,130,255,0.85)"}>
+                      <a href={`/profile/${detailAsset.owner}`} style={{fontSize:"12px",color:"rgba(160,130,255,0.85)",fontFamily:"monospace",textDecoration:"none",letterSpacing:"0.02em"}} onMouseOver={e=>e.currentTarget.style.color="rgba(196,181,253,1)"} onMouseOut={e=>e.currentTarget.style.color="rgba(160,130,255,0.85)"}>
                         {detailAsset.owner.slice(0,10)}...{detailAsset.owner.slice(-8)}
                       </a>
                       <button className="mp-copy" onClick={()=>copy(detailAsset.owner,"owner")}>{copied==="owner"?"✓ Copied":"Copy"}</button>
                     </div>
                   </div>
                   {[
-                    {label:"Listed", value:detailAsset.listedAt?new Date(detailAsset.listedAt).toLocaleString():new Date(detailAsset.uploadedAt).toLocaleString()},
-                    {label:"Likes",  value:`❤️ ${likeCount(detailAsset)}`},
+                    {label:"Listed",value:detailAsset.listedAt?new Date(detailAsset.listedAt).toLocaleString():new Date(detailAsset.uploadedAt).toLocaleString()},
+                    {label:"Likes",value:`❤️ ${likeCount(detailAsset)}`},
                     ...(detailAsset.listTxHash?[{label:"Tx Hash",value:`${detailAsset.listTxHash.slice(0,14)}...`,copyKey:"tx",copyVal:detailAsset.listTxHash}]:[]),
                   ].map((row,i)=>(
                     <div key={i} className="mp-drow">
                       <span style={{fontSize:"12px",color:"rgba(255,255,255,0.28)",fontWeight:500,fontFamily:"'Outfit',sans-serif"}}>{row.label}</span>
                       <div style={{display:"flex",alignItems:"center",gap:"8px"}}>
-                        <span style={{fontSize:"12px",color:"rgba(255,255,255,0.6)",fontFamily:row.copyKey?"monospace":"'Outfit',sans-serif"}}>{row.value}</span>
-                        {row.copyKey&&row.copyVal&&<button className="mp-copy" onClick={()=>copy(row.copyVal!,row.copyKey!)}>{copied===row.copyKey?"✓ Copied":"Copy"}</button>}
+                        <span style={{fontSize:"12px",color:"rgba(255,255,255,0.6)",fontFamily:(row as any).copyKey?"monospace":"'Outfit',sans-serif"}}>{row.value}</span>
+                        {(row as any).copyKey&&(row as any).copyVal&&<button className="mp-copy" onClick={()=>copy((row as any).copyVal,(row as any).copyKey)}>{copied===(row as any).copyKey?"✓ Copied":"Copy"}</button>}
                       </div>
                     </div>
                   ))}
@@ -621,8 +900,7 @@ export default function MarketplacePage() {
                       {detailAsset.buyHistory.map((bh,i)=>(
                         <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 13px",borderRadius:"11px",background:"rgba(255,255,255,0.022)",border:"1px solid rgba(255,255,255,0.055)"}}>
                           <div style={{display:"flex",alignItems:"center",gap:"9px"}}>
-                            <a href={`/profile/${bh.buyer}`} style={{fontSize:"11px",color:"rgba(160,130,255,0.8)",fontFamily:"monospace",textDecoration:"none"}}
-                              onMouseOver={e=>e.currentTarget.style.color="rgba(196,181,253,1)"} onMouseOut={e=>e.currentTarget.style.color="rgba(160,130,255,0.8)"}>
+                            <a href={`/profile/${bh.buyer}`} style={{fontSize:"11px",color:"rgba(160,130,255,0.8)",fontFamily:"monospace",textDecoration:"none"}} onMouseOver={e=>e.currentTarget.style.color="rgba(196,181,253,1)"} onMouseOut={e=>e.currentTarget.style.color="rgba(160,130,255,0.8)"}>
                               {short(bh.buyer)}
                             </a>
                             <span style={{fontSize:"10px",color:"rgba(255,255,255,0.2)",fontFamily:"'Outfit',sans-serif"}}>{fmtTime(bh.boughtAt)}</span>
