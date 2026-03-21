@@ -1,11 +1,3 @@
-const nextConfig = {
-  experimental: {
-    turbo: {
-      resolveAlias: {
-        "@aptos-connect/wallet-adapter-plugin": "./lib/aptos-connect-mock.js",
-      },
-    },
-  },
-};
+const nextConfig = {};
 
 export default nextConfig;
