@@ -1,5 +1,7 @@
 ShelbyVault:
 
+<img width="1839" height="925" alt="image" src="https://github.com/user-attachments/assets/514149e9-3311-4fde-a31e-39eebbe824cb" />
+
 🔗 Live: https://shelbyvault-production.up.railway.app/
 
 ShelbyVault is a decentralized digital asset marketplace built on Aptos and Shelby Protocol
@@ -17,4 +19,4 @@ Features:
 - User profiles : View owned assets, listings, purchases, and activity  
 - Live price ticker : Real-time prices via CoinGecko  
 - Volume tracking : Separate stats for APT and ShelbyUSD  
-- Archive system : Hide items without deleting them  
+- Archive system : Hide items without deleting them 
