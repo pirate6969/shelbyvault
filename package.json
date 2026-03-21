@@ -8,11 +8,19 @@
     "start": "next start",
     "lint": "eslint"
   },
+  "overrides": {
+    "@aptos-labs/wallet-standard": "0.1.0"
+  },
   "dependencies": {
     "@aptos-labs/ts-sdk": "^5.2.1",
-    "@aptos-labs/wallet-adapter-core": "^8.5.0",
-    "@aptos-labs/wallet-adapter-react": "^8.3.1",
+    "@aptos-labs/wallet-adapter-core": "^7.2.0",
+    "@aptos-labs/wallet-adapter-react": "^7.2.8",
+    "@shelby-protocol/react": "^1.0.3",
     "@shelby-protocol/sdk": "latest",
+    "@tanstack/react-query": "^5.91.3",
+    "@wallet-standard/core": "^1.1.1",
+    "buffer": "^6.0.3",
+    "got": "^14.6.6",
     "next": "^16.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

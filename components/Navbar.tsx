@@ -239,7 +239,7 @@ export default function Navbar() {
               >
                 <p className="text-xs text-white/30 px-3 pb-2">Choose wallet</p>
                 {wallets && wallets.length > 0 ? (
-                  wallets.map((wallet) => (
+                  wallets.map((wallet: any) => (
                     <button
                       key={wallet.name}
                       onClick={() => { connect(wallet.name); setShowWallets(false); }}

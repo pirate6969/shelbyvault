@@ -20,26 +20,28 @@ function writeAssets(assets: object[]) {
 
 export async function POST(req: Request) {
   try {
-    const { name, owner, uploader, fileType, shelbyUrl } = await req.json();
+    const { name, owner, uploader, fileType, shelbyUrl, thumbnailUrl, fileSize, storage, network } = await req.json();
 
     if (!name || !owner || !shelbyUrl) {
-      return NextResponse.json(
-        { error: "Missing required fields" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
     }
 
     const assets = readAssets();
     const newAsset = {
-      id:         crypto.randomUUID(),
+      id:           crypto.randomUUID(),
       name,
       owner,
       uploader,
-      fileType:   fileType || "application/octet-stream",
+      fileType:     fileType || "application/octet-stream",
       shelbyUrl,
-      price:      0,
-      listed:     false,
-      uploadedAt: new Date().toISOString(),
+      thumbnailUrl: thumbnailUrl || "",
+      fileSize:     fileSize || 0,
+      storage:      storage || "local",
+      network:      network || "",
+      price:        0,
+      listed:       false,
+      likes:        [],
+      uploadedAt:   new Date().toISOString(),
     };
 
     assets.push(newAsset);
