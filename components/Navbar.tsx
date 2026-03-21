@@ -69,11 +69,8 @@ export default function Navbar() {
       {/* ── Nav Links ── */}
       <div className="hidden md:flex items-center gap-8 text-sm font-medium text-white/50">
         {[
-          { label: "Home", href: "/" },
-          { label: "About", href: "/about" },
-          { label: "FAQ", href: "/faq" },
-          { label: "My Vault", href: "/vault" },
-          { label: "Profile", href: account ? `/profile/${account.address.toString()}` : "/profile" },
+          { label: "Home",        href: "/" },
+          { label: "My Vault",    href: "/vault" },
           { label: "Marketplace", href: "/marketplace" },
         ].map((link) => (
           <Link
@@ -84,6 +81,15 @@ export default function Navbar() {
             {link.label}
           </Link>
         ))}
+        {/* Profile only shows when wallet is connected */}
+        {connected && account && (
+          <Link
+            href={`/profile/${account.address.toString()}`}
+            className="hover:text-white transition-colors duration-200"
+          >
+            Profile
+          </Link>
+        )}
       </div>
 
       {/* ── Right Side ── */}

@@ -7,12 +7,11 @@ import { useRouter } from "next/navigation";
 type Step = "idle" | "uploading" | "done" | "error";
 
 // ─── Network / Currency helpers ───────────────────────────────────────────────
-const SHELBY_COIN_TYPE = "0x1::shelby_usd::ShelbyUSD";
+const SHELBY_COIN_TYPE = "0x249f5c642a63885ff88a5113b3ba0079840af5a1357706f8c7f3bfc5dd12511f::shelby_usd::ShelbyUSD";
 const APT_COIN_TYPE    = "0x1::aptos_coin::AptosCoin";
 
-// Gas-fee recipient (just needs to be a valid address — using sender itself is fine
-// for a "listing fee" simulation; replace with your treasury address if you have one)
-const GAS_RECIPIENT = "0x1"; // replace with your treasury / marketplace address
+// ── Fungible Asset metadata object address for ShelbyUSD ─────────────────────
+const SHELBY_USD_METADATA = "0x1b18363a9f1fe5e6ebf247daba5cc1c18052bb232efdc4c50f556053922d98e1";
 
 /** Returns true when connected to Shelbynet (any non-standard Aptos network) */
 const detectShelby = (networkName: string) =>
@@ -101,12 +100,22 @@ export default function UploadCard() {
       // 1. Small on-chain gas-fee confirmation using the CORRECT coin for the network
       //    Amount = 1 octa (smallest unit) — just to trigger wallet signature
       const tx = await signAndSubmitTransaction({
-        data: {
-          function:          "0x1::coin::transfer",
-          typeArguments:     [coinType],           // ✅ ShelbyUSD on Shelbynet, APT on Testnet
+        data: isShelby ? {
+          // ✅ ShelbyUSD is a Fungible Asset — use primary_fungible_store::transfer
+          function:          "0x1::primary_fungible_store::transfer",
+          typeArguments:     ["0x1::fungible_asset::Metadata"],
           functionArguments: [
-            GAS_RECIPIENT,                         // recipient address
-            "1",                                   // 1 octa — tiny gas confirmation fee
+            SHELBY_USD_METADATA,               // metadata object address
+            account.address.toString(),        // send to self (listing fee)
+            "10000",                           // amount in octas
+          ],
+        } : {
+          // ✅ APT is a Coin — use coin::transfer
+          function:          "0x1::coin::transfer",
+          typeArguments:     [APT_COIN_TYPE],
+          functionArguments: [
+            account.address.toString(),        // send to self (listing fee)
+            "10000",                           // amount in octas
           ],
         },
       });

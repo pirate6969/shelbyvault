@@ -5,8 +5,9 @@ import { useWallet } from "@aptos-labs/wallet-adapter-react";
 import Navbar from "@/components/Navbar";
 
 // ── Token types ───────────────────────────────────────────────────────────────
-const SHELBY_COIN_TYPE = "0x1::shelby_usd::ShelbyUSD";
+const SHELBY_COIN_TYPE = "0x249f5c642a63885ff88a5113b3ba0079840af5a1357706f8c7f3bfc5dd12511f::shelby_usd::ShelbyUSD";
 const APT_COIN_TYPE    = "0x1::aptos_coin::AptosCoin";
+const SHELBY_USD_METADATA = "0x1b18363a9f1fe5e6ebf247daba5cc1c18052bb232efdc4c50f556053922d98e1";
 
 interface Asset {
   id:string; name:string; owner:string; price:number; supply:number; sold:number;
@@ -117,9 +118,15 @@ export default function MarketplacePage() {
     try{
       const octas=Math.floor(asset.price*100_000_000);
       const tx=await signAndSubmitTransaction({
-        data:{
+        data: assetCurrency==="ShelbyUSD" ? {
+          // ✅ ShelbyUSD is Fungible Asset
+          function:"0x1::primary_fungible_store::transfer",
+          typeArguments:["0x1::fungible_asset::Metadata"],
+          functionArguments:[SHELBY_USD_METADATA, asset.owner, octas.toString()]
+        } : {
+          // ✅ APT is Coin
           function:"0x1::coin::transfer",
-          typeArguments:[assetCoinType], // ✅ correct coin for this asset
+          typeArguments:[APT_COIN_TYPE],
           functionArguments:[asset.owner, octas.toString()]
         }
       });
@@ -148,10 +155,14 @@ export default function MarketplacePage() {
     setDelisting(asset.id);
     try{
       const tx=await signAndSubmitTransaction({
-        data:{
+        data: isShelby ? {
+          function:"0x1::primary_fungible_store::transfer",
+          typeArguments:["0x1::fungible_asset::Metadata"],
+          functionArguments:[SHELBY_USD_METADATA, account.address.toString(), "10000"]
+        } : {
           function:"0x1::coin::transfer",
-          typeArguments:[coinType], // ✅ current network coin
-          functionArguments:[account.address.toString(),"1"] // 1 octa gas fee
+          typeArguments:[APT_COIN_TYPE],
+          functionArguments:[account.address.toString(),"10000"]
         }
       });
       await fetch("/api/marketplace",{
@@ -173,10 +184,14 @@ export default function MarketplacePage() {
     setLiking(asset.id);
     try{
       const tx=await signAndSubmitTransaction({
-        data:{
+        data: isShelby ? {
+          function:"0x1::primary_fungible_store::transfer",
+          typeArguments:["0x1::fungible_asset::Metadata"],
+          functionArguments:[SHELBY_USD_METADATA, account.address.toString(), "10000"]
+        } : {
           function:"0x1::coin::transfer",
-          typeArguments:[coinType], // ✅ current network coin
-          functionArguments:[account.address.toString(),"1"] // 1 octa gas fee
+          typeArguments:[APT_COIN_TYPE],
+          functionArguments:[account.address.toString(),"10000"]
         }
       });
       const res=await fetch("/api/likes",{
@@ -205,7 +220,7 @@ export default function MarketplacePage() {
   const detailAssetCurrency = detailAsset ? getDisplayCurrency(detailAsset) : "";
 
   const filtered=[...assets]
-    .filter(a=>!searchQuery||a.name?.toLowerCase().includes(searchQuery.toLowerCase()))
+    .filter(a=>!isSoldOut(a)&&(!searchQuery||a.name?.toLowerCase().includes(searchQuery.toLowerCase())))
     .sort((a,b)=>{
       if(sort==="price_low") return a.price-b.price;
       if(sort==="price_high") return b.price-a.price;
@@ -213,8 +228,41 @@ export default function MarketplacePage() {
       return 0;
     });
 
-  const totalVol  =allAssets.reduce((s,a)=>s+(a.price??0)*(a.sold??0),0);
-  const floorPrice=assets.length?Math.min(...assets.map(a=>a.price)):0;
+  const soldOutFiltered=[...assets]
+    .filter(a=>isSoldOut(a)&&(!searchQuery||a.name?.toLowerCase().includes(searchQuery.toLowerCase())))
+    .sort((a,b)=>(b.likes?.length??0)-(a.likes?.length??0));
+
+  // ── Network-specific volume ───────────────────────────────────────────────
+  const networkCurrency = isShelby ? "ShelbyUSD" : "$APT";
+
+  // For items/floor: use top-level currency if available, else check buyHistory
+  const getAssetCurrencyGuess = (a: Asset): string => {
+    if (a.currency) return a.currency;
+    const hist = a.buyHistory ?? [];
+    for (const bh of hist) {
+      if (bh.currency === "ShelbyUSD") return "ShelbyUSD";
+      if (bh.currency === "APT" || bh.currency === "$APT") return "$APT";
+    }
+    return networkCurrency;
+  };
+
+  // Volume: sum buyHistory by current network currency
+  const totalVol = allAssets.reduce((s, a) => {
+    const hist = a.buyHistory ?? [];
+    return s + hist
+      .filter(bh => {
+        const c = bh.currency ?? "";
+        return isShelby ? c === "ShelbyUSD" : (c === "APT" || c === "$APT");
+      })
+      .reduce((sum, bh) => sum + (bh.price ?? 0), 0);
+  }, 0);
+
+  // Items/Floor: use ALL listed assets (they're already filtered by network via API)
+  const networkAssets = assets;
+  const totalItems = networkAssets.length;
+  const floorPrice = networkAssets.length
+    ? Math.min(...networkAssets.map(a => a.price))
+    : 0;
 
   return (
     <>
@@ -337,10 +385,10 @@ export default function MarketplacePage() {
 
               <div style={{display:"flex",gap:"10px",flexWrap:"wrap"}}>
                 {[
-                  {label:"Total Items",  value:allAssets.length.toString()},
-                  {label:"Volume",       value:totalVol.toFixed(2)+" "+currency},
-                  {label:"Floor Price",  value:assets.length?floorPrice.toFixed(2)+" "+currency:"—"},
-                  {label:"Total Likes",  value:allAssets.reduce((s,a)=>s+likeCount(a),0).toString()},
+                  {label:"Total Items",  value:totalItems.toString()},
+                  {label:"Volume",       value:totalVol.toFixed(2)+" "+networkCurrency},
+                  {label:"Floor Price",  value:totalItems?floorPrice.toFixed(2)+" "+networkCurrency:"—"},
+                  {label:"Total Likes",  value:networkAssets.reduce((s,a)=>s+likeCount(a),0).toString()},
                 ].map((s,i)=>(
                   <div key={i} className="mp-stat">
                     <span className="mp-stat-val">{s.value}</span>
@@ -417,6 +465,7 @@ export default function MarketplacePage() {
                       <div>
                         <p style={{fontWeight:600,fontSize:"13px",color:"rgba(255,255,255,0.88)",margin:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",fontFamily:"'Outfit',sans-serif",letterSpacing:"0.005em"}}>{asset.name}</p>
                         <p style={{fontSize:"11px",color:"rgba(255,255,255,0.22)",margin:"3px 0 0",fontFamily:"'Outfit',sans-serif"}}>{new Date(asset.uploadedAt).toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</p>
+                        <p style={{fontSize:"10px",color:"rgba(108,56,255,0.6)",margin:"4px 0 0",fontFamily:"'Outfit',sans-serif",letterSpacing:"0.02em"}}>See full details →</p>
                       </div>
                       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                         <div>
@@ -432,13 +481,14 @@ export default function MarketplacePage() {
                       <div style={{height:"3px",borderRadius:"999px",background:"rgba(255,255,255,0.06)",overflow:"hidden"}}>
                         <div style={{height:"100%",borderRadius:"999px",transition:"width 0.4s",width:`${Math.min(100,((asset.sold??0)/(asset.supply??1))*100)}%`,background:soldOut?"#ef4444":"linear-gradient(90deg,#6c38ff,#a855f7)"}}/>
                       </div>
+                      <p style={{fontSize:"10px",color:"rgba(255,255,255,0.18)",textAlign:"center",fontFamily:"'Outfit',sans-serif",letterSpacing:"0.04em",cursor:"pointer"}}>tap for full details →</p>
                       {success===asset.id&&<p style={{fontSize:"11px",color:"#4ade80",fontWeight:700,textAlign:"center",fontFamily:"'Outfit',sans-serif"}}>✓ Purchased!</p>}
-                      {owner
+                      {owner && !soldOut
                         ? <button onClick={e=>{e.stopPropagation();handleDelist(asset);}} disabled={!!delisting} style={{width:"100%",padding:"10px",borderRadius:"11px",fontSize:"12px",fontWeight:600,background:"rgba(239,68,68,0.07)",border:"1px solid rgba(239,68,68,0.24)",color:"rgba(248,113,113,0.8)",cursor:"pointer",fontFamily:"'Outfit',sans-serif",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.background="rgba(239,68,68,0.14)"} onMouseOut={e=>e.currentTarget.style.background="rgba(239,68,68,0.07)"}>
                             {delisting===asset.id?<span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"6px"}}><span className="spin" style={{width:"11px",height:"11px",border:"1.5px solid #f87171",borderTopColor:"transparent",borderRadius:"50%",display:"inline-block"}}/>Delisting...</span>:"Delist"}
                           </button>
                         : soldOut
-                          ? <button disabled style={{width:"100%",padding:"10px",borderRadius:"11px",fontSize:"12px",fontWeight:600,opacity:0.28,cursor:"not-allowed",background:"rgba(80,80,80,0.08)",border:"1px solid rgba(80,80,80,0.2)",color:"rgba(255,255,255,0.28)",fontFamily:"'Outfit',sans-serif"}}>Sold Out</button>
+                          ? <div style={{width:"100%",padding:"10px",borderRadius:"11px",fontSize:"12px",fontWeight:600,textAlign:"center",background:"rgba(80,80,80,0.08)",border:"1px solid rgba(80,80,80,0.2)",color:"rgba(255,255,255,0.28)",fontFamily:"'Outfit',sans-serif"}}>Sold Out</div>
                           : <button className="mp-buy" onClick={e=>{e.stopPropagation();handleBuy(asset);}} disabled={!!buying}>
                               {buying===asset.id?<span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"7px"}}><span className="spin" style={{width:"13px",height:"13px",border:"2px solid rgba(255,255,255,0.35)",borderTopColor:"white",borderRadius:"50%",display:"inline-block"}}/>Confirming...</span>:`Buy · ${asset.price} ${assetCurrency}`}
                             </button>}
@@ -446,6 +496,46 @@ export default function MarketplacePage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* ── SOLD OUT SECTION ── */}
+          {!loading&&soldOutFiltered.length>0&&(
+            <div style={{marginTop:"48px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"20px"}}>
+                <div style={{height:"1px",flex:1,background:"rgba(255,255,255,0.06)"}}/>
+                <p style={{fontSize:"11px",fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",color:"rgba(255,255,255,0.2)",fontFamily:"'Outfit',sans-serif",whiteSpace:"nowrap"}}>🏆 Sold Out</p>
+                <div style={{height:"1px",flex:1,background:"rgba(255,255,255,0.06)"}}/>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:"16px"}}>
+                {soldOutFiltered.map((asset,idx)=>{
+                  const assetCurrency=getDisplayCurrency(asset);
+                  return(
+                    <div key={asset.id} className="mp-card" style={{animationDelay:`${idx*0.04}s`,opacity:0.7}} onClick={()=>setDetailAsset(asset)}>
+                      <div style={{position:"relative",aspectRatio:"1",background:"rgba(255,255,255,0.02)",overflow:"hidden"}}>
+                        {asset.fileType?.startsWith("image/")
+                          ?<img src={asset.shelbyUrl} alt={asset.name} style={{width:"100%",height:"100%",objectFit:"cover",filter:"grayscale(30%)"}}/>
+                          :<div style={{width:"100%",height:"100%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"36px"}}>🎵</div>}
+                        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.4)"}}/>
+                        <div style={{position:"absolute",top:"10px",left:"10px"}}>
+                          <div className="mp-tag" style={{background:"rgba(0,0,0,0.65)",border:"1px solid rgba(255,255,255,0.1)",color:"rgba(255,255,255,0.38)"}}>🏆 Sold Out</div>
+                        </div>
+                        <div style={{position:"absolute",top:"10px",right:"10px",display:"flex",alignItems:"center",gap:"5px",padding:"5px 10px",borderRadius:"999px",background:"rgba(0,0,0,0.5)",border:"1px solid rgba(255,255,255,0.1)"}}>
+                          <span style={{fontSize:"11px"}}>❤️</span>
+                          <span style={{fontSize:"11px",fontWeight:700,color:"rgba(255,255,255,0.7)",fontFamily:"'Outfit',sans-serif"}}>{likeCount(asset)}</span>
+                        </div>
+                      </div>
+                      <div style={{padding:"14px 16px 16px",display:"flex",flexDirection:"column",gap:"8px"}}>
+                        <p style={{fontWeight:600,fontSize:"13px",color:"rgba(255,255,255,0.55)",margin:0,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",fontFamily:"'Outfit',sans-serif"}}>{asset.name}</p>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <p style={{fontSize:"13px",fontWeight:700,color:"rgba(255,255,255,0.25)",fontFamily:"'Outfit',sans-serif"}}>{asset.price} {assetCurrency}</p>
+                          <p style={{fontSize:"11px",color:"rgba(239,68,68,0.7)",fontWeight:700,fontFamily:"'Outfit',sans-serif"}}>{asset.supply} / {asset.supply} sold</p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -558,7 +648,7 @@ export default function MarketplacePage() {
                     {buying===detailAsset.id?<span style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px"}}><span className="spin" style={{width:"14px",height:"14px",border:"2px solid rgba(255,255,255,0.35)",borderTopColor:"white",borderRadius:"50%",display:"inline-block"}}/>Confirming...</span>:`Buy Now · ${detailAsset.price} ${detailAssetCurrency}`}
                   </button>
                 )}
-                {isOwner(detailAsset)&&(
+                {isOwner(detailAsset)&&!isSoldOut(detailAsset)&&(
                   <button onClick={()=>{setDetailAsset(null);handleDelist(detailAsset);}} style={{width:"100%",padding:"13px",borderRadius:"12px",fontSize:"13px",fontWeight:700,background:"rgba(239,68,68,0.07)",border:"1px solid rgba(239,68,68,0.28)",color:"rgba(248,113,113,0.85)",cursor:"pointer",fontFamily:"'Outfit',sans-serif",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.background="rgba(239,68,68,0.14)"} onMouseOut={e=>e.currentTarget.style.background="rgba(239,68,68,0.07)"}>
                     Delist from Marketplace
                   </button>
