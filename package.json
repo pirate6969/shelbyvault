@@ -20,7 +20,6 @@
     "@tanstack/react-query": "^5.91.3",
     "@wallet-standard/core": "^1.1.1",
     "buffer": "^6.0.3",
-    "cross-env": "^7.0.3",
     "got": "^14.6.6",
     "next": "^16.1.6",
     "react": "^19.0.0",
