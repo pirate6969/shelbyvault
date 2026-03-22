@@ -51,13 +51,13 @@ export async function GET(req: NextRequest) {
     name:     profile.name     ?? "",
     bio:      profile.bio      ?? "",
     avatar:   profile.avatar   ?? "",
-    banner:   profile.banner   ?? "",   // ← was missing!
-    url:      profile.url      ?? "",   // ← was missing!
-    twitter:  profile.twitter          ?? "",
-    discord:  profile.discord          ?? "",
-    twitterVerified: profile.twitterVerified  ?? false,
-    emailVerified:   profile.emailVerified    ?? false,
-    discordVerified: profile.discordVerified  ?? false,
+    banner:   profile.banner   ?? "",
+    url:      profile.url      ?? "",
+    twitter:  profile.twitter  ?? "",
+    discord:  profile.discord  ?? "",
+    twitterVerified: profile.twitterVerified ?? false,
+    emailVerified:   profile.emailVerified   ?? false,
+    discordVerified: profile.discordVerified ?? false,
     joinedAt: profile.joinedAt ?? null,
     owned, listed, bought, created,
     stats: {
@@ -72,13 +72,34 @@ export async function GET(req: NextRequest) {
 
 // POST /api/profile
 export async function POST(req: NextRequest) {
-  const { address, name, bio, avatar, banner, url, twitter, discord, twitterVerified, emailVerified, discordVerified, email } = await req.json();
+  const {
+    address, name, bio, avatar, banner, url,
+    twitter, discord, twitterVerified, emailVerified, discordVerified, email
+  } = await req.json();
+
   if (!address) return NextResponse.json({ error: "address required" }, { status: 400 });
 
   const profiles = readProfiles();
+
+  // ── USERNAME DUPLICATE CHECK ──
+  if (name !== undefined && name.trim() !== "") {
+    const duplicate = Object.entries(profiles).find(
+      ([addr, profile]: [string, any]) =>
+        addr.toLowerCase() !== address.toLowerCase() &&
+        profile.name &&
+        profile.name.toLowerCase() === name.trim().toLowerCase()
+    );
+    if (duplicate) {
+      return NextResponse.json(
+        { error: "username_taken", message: "This username is already taken. Please choose a different one." },
+        { status: 409 }
+      );
+    }
+  }
+
   if (!profiles[address]) profiles[address] = { joinedAt: new Date().toISOString() };
 
-  if (name             !== undefined) profiles[address].name             = name;
+  if (name             !== undefined) profiles[address].name             = name.trim();
   if (bio              !== undefined) profiles[address].bio              = bio;
   if (avatar           !== undefined) profiles[address].avatar           = avatar;
   if (banner           !== undefined) profiles[address].banner           = banner;

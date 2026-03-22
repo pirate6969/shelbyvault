@@ -8,8 +8,8 @@ const SHELBY_USD_METADATA = "0x1b18363a9f1fe5e6ebf247daba5cc1c18052bb232efdc4c50
 
 interface Asset {
   id: string; name: string; owner: string; price: number; supply: number;
-  sold: number; fileType: string; shelbyUrl: string; thumbnailUrl?: string;
-  fileSize?: number; listed: boolean; uploadedAt: string; likes: string[];
+  sold: number; fileType: string; shelbyUrl: string; listed: boolean; uploadedAt: string; likes: string[];
+  thumbnailUrl?: string; fileSize?: number;
 }
 
 function VideoThumbnail({ src, thumbnailUrl }: { src: string; thumbnailUrl?: string }) {
@@ -63,6 +63,7 @@ function VideoThumbnail({ src, thumbnailUrl }: { src: string; thumbnailUrl?: str
 
 function VideoPlayer({ asset, onClose }: { asset: Asset; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -94,76 +95,22 @@ function VideoPlayer({ asset, onClose }: { asset: Asset; onClose: () => void }) 
     };
   }, []);
 
-  const togglePlay = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) { v.play(); } else { v.pause(); }
-  };
-
-  const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    const v = videoRef.current;
-    if (!v) return;
-    const val = parseFloat(e.target.value);
-    v.currentTime = val;
-    setProgress(val);
-  };
-
-  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-    e.stopPropagation();
-    const v = videoRef.current;
-    const val = parseFloat(e.target.value);
-    setVolume(val);
-    if (v) { v.volume = val; v.muted = val === 0; }
-    setMuted(val === 0);
-  };
-
-  const toggleMute = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const v = videoRef.current;
-    if (!v) return;
-    const next = !muted;
-    v.muted = next;
-    setMuted(next);
-  };
-
-  const handleFullscreen = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (videoRef.current?.requestFullscreen) videoRef.current.requestFullscreen();
-  };
-
-  const handleDownload = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    const a = document.createElement("a");
-    a.href = asset.shelbyUrl; a.download = asset.name; a.click();
-  };
-
-  const handleCopyLink = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard.writeText(asset.shelbyUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const fmt = (s: number) => {
-    if (!s || isNaN(s)) return "0:00";
-    return Math.floor(s / 60) + ":" + Math.floor(s % 60).toString().padStart(2, "0");
-  };
-
-  const handleMouseMove = () => {
-    setShowControls(true);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => { if (playing) setShowControls(false); }, 2800);
-  };
-
+  const togglePlay = (e: React.MouseEvent) => { e.stopPropagation(); const v = videoRef.current; if (!v) return; v.paused ? v.play() : v.pause(); };
+  const seek = (e: React.ChangeEvent<HTMLInputElement>) => { e.stopPropagation(); const v = videoRef.current; if (!v) return; const val = parseFloat(e.target.value); v.currentTime = val; setProgress(val); };
+  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => { e.stopPropagation(); const v = videoRef.current; const val = parseFloat(e.target.value); setVolume(val); if (v) { v.volume = val; v.muted = val === 0; } setMuted(val === 0); };
+  const toggleMute = (e: React.MouseEvent) => { e.stopPropagation(); const v = videoRef.current; if (!v) return; v.muted = !muted; setMuted(!muted); };
+  const handleFullscreen = (e: React.MouseEvent) => { e.stopPropagation(); const el = wrapperRef.current; if (el?.requestFullscreen) el.requestFullscreen(); };
+  const handleDownload = (e: React.MouseEvent) => { e.stopPropagation(); const a = document.createElement("a"); a.href = asset.shelbyUrl; a.download = asset.name; a.click(); };
+  const handleCopyLink = (e: React.MouseEvent) => { e.stopPropagation(); navigator.clipboard.writeText(asset.shelbyUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const fmt = (s: number) => { if (!s || isNaN(s)) return "0:00"; return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`; };
+  const handleMouseMove = () => { setShowControls(true); if (hideTimer.current) clearTimeout(hideTimer.current); hideTimer.current = setTimeout(() => { if (playing) setShowControls(false); }, 2800); };
   const pct = duration ? (progress / duration) * 100 : 0;
 
   return (
-    <div onClick={e => e.stopPropagation()} style={{position:"relative",width:"90vw",maxWidth:"960px",background:"#000",borderRadius:"16px",overflow:"hidden",boxShadow:"0 0 80px rgba(108,56,255,0.3)",border:"1px solid rgba(255,255,255,0.08)"}}>
+    <div ref={wrapperRef} onClick={e => e.stopPropagation()} style={{position:"relative",width:"90vw",maxWidth:"960px",background:"#000",borderRadius:"16px",overflow:"hidden",boxShadow:"0 0 80px rgba(108,56,255,0.3)",border:"1px solid rgba(255,255,255,0.08)"}}>
       <button onClick={onClose} style={{position:"absolute",top:"14px",right:"14px",zIndex:20,width:"34px",height:"34px",borderRadius:"50%",background:"rgba(0,0,0,0.75)",border:"1px solid rgba(255,255,255,0.2)",color:"white",fontSize:"14px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",backdropFilter:"blur(10px)",transition:"all 0.18s"}} onMouseOver={e=>e.currentTarget.style.background="rgba(255,255,255,0.2)"} onMouseOut={e=>e.currentTarget.style.background="rgba(0,0,0,0.75)"}>✕</button>
       <div style={{position:"relative",cursor:"pointer"}} onMouseMove={handleMouseMove} onClick={togglePlay}>
-        <video ref={videoRef} src={asset.shelbyUrl} loop playsInline preload="auto" style={{width:"100%",maxHeight:"70vh",display:"block",background:"#000"}}/>
+        <video ref={videoRef} src={asset.shelbyUrl} loop playsInline preload="auto" style={{width:"100%",maxHeight:"70vh",display:"block",background:"#000",objectFit:"contain"}}/>
         {!playing && (
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",background:"rgba(0,0,0,0.25)",pointerEvents:"none"}}>
             <div style={{width:"64px",height:"64px",borderRadius:"50%",background:"rgba(108,56,255,0.9)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 0 40px rgba(108,56,255,0.7)"}}>
@@ -246,50 +193,13 @@ function AudioPlayer({ asset, onClose }: { asset: Asset; onClose: () => void }) 
     };
   }, []);
 
-  const togglePlay = () => {
-    const a = audioRef.current;
-    if (!a) return;
-    if (a.paused) { a.play(); } else { a.pause(); }
-  };
-
-  const seek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.currentTime = parseFloat(e.target.value);
-    setProgress(parseFloat(e.target.value));
-  };
-
-  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const a = audioRef.current;
-    const val = parseFloat(e.target.value);
-    setVolume(val);
-    if (a) { a.volume = val; a.muted = val === 0; }
-    setMuted(val === 0);
-  };
-
-  const toggleMute = () => {
-    const a = audioRef.current;
-    if (!a) return;
-    a.muted = !muted;
-    setMuted(!muted);
-  };
-
-  const handleDownload = () => {
-    const el = document.createElement("a");
-    el.href = asset.shelbyUrl; el.download = asset.name; el.click();
-  };
-
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(asset.shelbyUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const fmt = (s: number) => {
-    if (!s || isNaN(s)) return "0:00";
-    return Math.floor(s / 60) + ":" + Math.floor(s % 60).toString().padStart(2, "0");
-  };
-
+  const togglePlay = () => { const a = audioRef.current; if (!a) return; a.paused ? a.play() : a.pause(); };
+  const seek = (e: React.ChangeEvent<HTMLInputElement>) => { const a = audioRef.current; if (!a) return; const v = parseFloat(e.target.value); a.currentTime = v; setProgress(v); };
+  const changeVolume = (e: React.ChangeEvent<HTMLInputElement>) => { const a = audioRef.current; const v = parseFloat(e.target.value); setVolume(v); if (a) { a.volume = v; a.muted = v === 0; } setMuted(v === 0); };
+  const toggleMute = () => { const a = audioRef.current; if (!a) return; a.muted = !muted; setMuted(!muted); };
+  const handleDownload = () => { const el = document.createElement("a"); el.href = asset.shelbyUrl; el.download = asset.name; el.click(); };
+  const handleCopyLink = () => { navigator.clipboard.writeText(asset.shelbyUrl); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const fmt = (s: number) => { if (!s || isNaN(s)) return "0:00"; return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, "0")}`; };
   const pct = duration ? (progress / duration) * 100 : 0;
 
   return (
@@ -305,9 +215,7 @@ function AudioPlayer({ asset, onClose }: { asset: Asset; onClose: () => void }) 
           <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.7)" strokeWidth="1.2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
           {playing && (
             <div style={{position:"absolute",bottom:"12px",left:"50%",transform:"translateX(-50%)",display:"flex",gap:"3px",alignItems:"flex-end"}}>
-              {[1,2,3,4].map(i => (
-                <div key={i} style={{width:"3px",background:"rgba(168,85,247,0.8)",borderRadius:"2px",height:"8px",animation:"audioBar" + i + " 0.8s ease-in-out infinite"}}/>
-              ))}
+              {[1,2,3,4].map(i => (<div key={i} style={{width:"3px",background:"rgba(168,85,247,0.8)",borderRadius:"2px",height:"8px",animation:`audioBar${i} 0.8s ease-in-out infinite`}}/>))}
             </div>
           )}
         </div>
@@ -372,6 +280,7 @@ export default function VaultPage() {
   const [supply, setSupply]               = useState("");
   const [submitting, setSubmitting]       = useState(false);
   const [filter, setFilter]               = useState<"all"|"listed"|"unlisted">("all");
+  const [typeFilter, setTypeFilter]         = useState("all");
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const networkName = network?.name?.toLowerCase() ?? "";
@@ -486,7 +395,7 @@ export default function VaultPage() {
   const isVideo    = (a: Asset) => a.fileType.startsWith("video/");
   const isAudio    = (a: Asset) => a.fileType.startsWith("audio/");
   const isImage    = (a: Asset) => a.fileType.startsWith("image/");
-  const filtered   = assets.filter(a => filter === "all" ? true : filter === "listed" ? a.listed : !a.listed);
+  const filtered   = assets.filter(a => (filter === "all" ? true : filter === "listed" ? a.listed : !a.listed) && (typeFilter==="all"||(typeFilter==="video"&&isVideo(a))||(typeFilter==="audio"&&isAudio(a))||(typeFilter==="image"&&isImage(a))));
   const totalLikes  = assets.reduce((s, a) => s + likeCount(a), 0);
   const totalListed = assets.filter(a => a.listed).length;
 
@@ -500,6 +409,14 @@ export default function VaultPage() {
         @keyframes cardIn  { from{opacity:0;transform:translateY(12px) scale(0.97)} to{opacity:1;transform:none} }
         @keyframes orb1    { 0%,100%{transform:translate(0,0) scale(1)} 45%{transform:translate(35px,-25px) scale(1.08)} }
         @keyframes orb2    { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-28px,20px)} }
+        @keyframes elec{0%{background-position:0% 50%}100%{background-position:300% 50%}}
+        .mv-type-btn{position:relative;padding:8px 18px;border-radius:12px;font-size:11px;font-weight:700;font-family:Outfit,sans-serif;cursor:pointer;transition:color 0.2s,background 0.2s;display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.04);backdrop-filter:blur(14px);border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.45);white-space:nowrap;}
+        .mv-type-btn:hover{color:rgba(255,255,255,0.8);background:rgba(108,56,255,0.08);}
+        .mv-type-btn.on{color:#fff;}
+        .mv-type-btn.all-t.on{border:2.5px solid transparent;background:#0c061c;background-image:linear-gradient(#0c061c,#0c061c),linear-gradient(90deg,#6c38ff,#a855f7,#ec4899,#a855f7,#6c38ff);background-origin:border-box;background-clip:padding-box,border-box;background-size:auto,300% 100%;animation:elec 1s linear infinite;}
+        .mv-type-btn.vid-t.on{border:2.5px solid transparent;background:#0c061c;background-image:linear-gradient(#0c061c,#0c061c),linear-gradient(90deg,#4f46e5,#818cf8,#c7d2fe,#818cf8,#4f46e5);background-origin:border-box;background-clip:padding-box,border-box;background-size:auto,300% 100%;animation:elec 1s linear infinite;}
+        .mv-type-btn.mus-t.on{border:2.5px solid transparent;background:#0c061c;background-image:linear-gradient(#0c061c,#0c061c),linear-gradient(90deg,#a855f7,#ec4899,#fda4af,#ec4899,#a855f7);background-origin:border-box;background-clip:padding-box,border-box;background-size:auto,300% 100%;animation:elec 1s linear infinite;}
+        .mv-type-btn.img-t.on{border:2.5px solid transparent;background:#0c061c;background-image:linear-gradient(#0c061c,#0c061c),linear-gradient(90deg,#0891b2,#38bdf8,#bae6fd,#38bdf8,#0891b2);background-origin:border-box;background-clip:padding-box,border-box;background-size:auto,300% 100%;animation:elec 1s linear infinite;}
         .mv-root { font-family:'Outfit',sans-serif; background:#06050f; color:#fff; }
         .mv-header { position:relative; overflow:hidden; background:linear-gradient(160deg,#0d0b1e 0%,#0b0918 60%,#080614 100%); border-bottom:1px solid rgba(255,255,255,0.06); padding:34px 64px; display:flex; align-items:center; justify-content:space-between; gap:24px; flex-wrap:wrap; }
         .mv-canvas { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; }
@@ -598,7 +515,19 @@ export default function VaultPage() {
           {!connected && (<div className="mv-empty"><div style={{fontSize:"34px",marginBottom:"12px"}}>🔒</div><p style={{color:"rgba(255,255,255,0.38)",fontSize:"14px",fontWeight:600,marginBottom:"5px",fontFamily:"'Outfit',sans-serif"}}>Wallet not connected</p><p style={{color:"rgba(255,255,255,0.2)",fontSize:"12px",fontFamily:"'Outfit',sans-serif"}}>Connect your wallet to view your vault</p></div>)}
           {connected && loading && (<div style={{display:"flex",justifyContent:"center",padding:"80px 0"}}><div className="spin" style={{width:"28px",height:"28px",border:"2px solid rgba(108,56,255,0.2)",borderTopColor:"#6c38ff",borderRadius:"50%"}}/></div>)}
           {connected && !loading && assets.length === 0 && (<div className="mv-empty"><div style={{fontSize:"34px",marginBottom:"12px"}}>📭</div><p style={{color:"rgba(255,255,255,0.38)",fontSize:"14px",fontWeight:600,marginBottom:"5px",fontFamily:"'Outfit',sans-serif"}}>No assets yet</p><p style={{color:"rgba(255,255,255,0.2)",fontSize:"12px",fontFamily:"'Outfit',sans-serif"}}>Upload files from the home page to get started</p></div>)}
-          {connected && !loading && assets.length > 0 && (<><div className="mv-divider"/><div className="mv-chips">{([{key:"all",label:"All (" + assets.length + ")"},{key:"listed",label:"Listed (" + totalListed + ")"},{key:"unlisted",label:"Unlisted (" + (assets.length-totalListed) + ")"}] as const).map(f=>(<button key={f.key} className={"mv-chip" + (filter===f.key?" on":"")} onClick={()=>setFilter(f.key)}>{f.label}</button>))}</div></>)}
+          {connected && !loading && assets.length > 0 && (<><div className="mv-divider"/>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:"12px",marginBottom:"24px"}}>
+              <div className="mv-chips" style={{margin:0}}>
+                {([{key:"all",label:"All (" + assets.length + ")"},{key:"listed",label:"Listed (" + totalListed + ")"},{key:"unlisted",label:"Unlisted (" + (assets.length-totalListed) + ")"}] as const).map(f=>(<button key={f.key} className={"mv-chip" + (filter===f.key?" on":"")} onClick={()=>setFilter(f.key)}>{f.label}</button>))}
+              </div>
+              <div style={{display:"flex",gap:"8px"}}>
+                <button className={"mv-type-btn all-t"+(typeFilter==="all"?" on":"")} onClick={()=>setTypeFilter("all")}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>All</button>
+                <button className={"mv-type-btn vid-t"+(typeFilter==="video"?" on":"")} onClick={()=>setTypeFilter("video")}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>Videos</button>
+                <button className={"mv-type-btn mus-t"+(typeFilter==="audio"?" on":"")} onClick={()=>setTypeFilter("audio")}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>Music</button>
+                <button className={"mv-type-btn img-t"+(typeFilter==="image"?" on":"")} onClick={()=>setTypeFilter("image")}><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>Photos</button>
+              </div>
+            </div>
+          </>)}
 
           {connected && !loading && filtered.length > 0 && (
             <div className="mv-grid">
@@ -611,11 +540,8 @@ export default function VaultPage() {
                 return (
                   <div key={asset.id} className={"mv-card" + (asset.listed?" is-listed":"")} style={{animationDelay:idx*0.04+"s"}}>
                     <div className="mv-img" onClick={()=>(image||video||audio)&&setPreviewAsset(asset)}>
-
                       {image && <img src={asset.shelbyUrl} alt={asset.name}/>}
-
                       {video && <VideoThumbnail src={asset.shelbyUrl} thumbnailUrl={asset.thumbnailUrl}/>}
-
                       {audio && (
                         <div className="mv-media-thumb">
                           <div style={{position:"absolute",inset:0,background:"radial-gradient(circle at 50% 50%,rgba(108,56,255,0.1),transparent 70%)"}}/>
@@ -624,7 +550,6 @@ export default function VaultPage() {
                           </div>
                         </div>
                       )}
-
                       <div className="mv-img-ov">
                         {image && <div className="mv-pill">View</div>}
                         {video && <div className="mv-pill">▶ Play</div>}
