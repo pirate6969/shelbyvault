@@ -57,7 +57,7 @@ function MobileOverlay() {
 export default function Navbar() {
   const { account, connected, connect, disconnect, wallets, network, changeNetwork } = useWallet();
   const [showWallets, setShowWallets] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState<boolean | null>(null);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 1024);
@@ -65,6 +65,9 @@ export default function Navbar() {
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
   }, []);
+
+  // Wait for client check — show nothing to avoid flicker
+  if (isMobile === null) return null;
 
   // Show mobile overlay
   if (isMobile) return <MobileOverlay />;
