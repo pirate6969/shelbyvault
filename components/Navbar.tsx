@@ -1,13 +1,73 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useWallet } from "@aptos-labs/wallet-adapter-react";
 
+// ── MOBILE OVERLAY ────────────────────────────────────────────────────────────
+function MobileOverlay() {
+  return (
+    <div style={{
+      position: "fixed", inset: 0, zIndex: 9999,
+      background: "linear-gradient(145deg, #06050f, #0d0820, #120a28)",
+      display: "flex", flexDirection: "column", alignItems: "center",
+      justifyContent: "center", padding: "40px 32px", textAlign: "center",
+    }}>
+      {/* Orbs */}
+      <div style={{ position: "absolute", top: "-80px", left: "-80px", width: "320px", height: "320px", borderRadius: "50%", background: "radial-gradient(circle, rgba(236,72,153,0.18) 0%, transparent 65%)", filter: "blur(40px)", pointerEvents: "none" }}/>
+      <div style={{ position: "absolute", bottom: "-60px", right: "-60px", width: "280px", height: "280px", borderRadius: "50%", background: "radial-gradient(circle, rgba(108,56,255,0.18) 0%, transparent 65%)", filter: "blur(40px)", pointerEvents: "none" }}/>
+
+      {/* Logo */}
+      <div style={{ position: "relative", width: "72px", height: "72px", borderRadius: "50%", overflow: "hidden", border: "2px solid rgba(236,72,153,0.5)", boxShadow: "0 0 28px rgba(236,72,153,0.4)", marginBottom: "24px" }}>
+        <Image src="/shelby logo.jpg" alt="Logo" width={72} height={72} style={{ width: "100%", height: "100%", objectFit: "cover", mixBlendMode: "screen" }}/>
+      </div>
+
+      {/* Brand */}
+      <h1 style={{ fontSize: "28px", fontWeight: 900, fontFamily: "'Outfit', sans-serif", background: "linear-gradient(135deg, #f472b6, #c084fc, #818cf8)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: "8px", letterSpacing: "-0.02em" }}>
+        ShelbyVault
+      </h1>
+
+      {/* Divider */}
+      <div style={{ width: "48px", height: "2px", background: "linear-gradient(90deg, #ec4899, #a855f7)", borderRadius: "999px", margin: "16px auto 24px" }}/>
+
+      {/* Icon */}
+      <div style={{ width: "64px", height: "64px", borderRadius: "18px", background: "rgba(108,56,255,0.12)", border: "1px solid rgba(108,56,255,0.28)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "24px" }}>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,0.8)" strokeWidth="1.5" strokeLinecap="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+      </div>
+
+      {/* Message */}
+      <h2 style={{ fontSize: "20px", fontWeight: 700, fontFamily: "'Outfit', sans-serif", color: "rgba(255,255,255,0.88)", marginBottom: "12px", lineHeight: 1.3 }}>
+        Please use Desktop<br/>for the best experience
+      </h2>
+      <p style={{ fontSize: "13px", color: "rgba(255,255,255,0.32)", fontFamily: "'Outfit', sans-serif", lineHeight: 1.7, maxWidth: "260px" }}>
+        ShelbyVault is optimized for desktop browsers. Open this link on your computer for full access.
+      </p>
+
+      {/* URL pill */}
+      <div style={{ marginTop: "28px", padding: "10px 20px", borderRadius: "12px", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.09)", fontSize: "11px", fontFamily: "monospace", color: "rgba(255,255,255,0.3)", letterSpacing: "0.02em" }}>
+        shelbyvault-production.up.railway.app
+      </div>
+    </div>
+  );
+}
+
 export default function Navbar() {
   const { account, connected, connect, disconnect, wallets, network, changeNetwork } = useWallet();
   const [showWallets, setShowWallets] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 1024);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, []);
+
+  // Show mobile overlay
+  if (isMobile) return <MobileOverlay />;
 
   const shortAddr = (addr: string) =>
     addr ? addr.slice(0, 6) + "..." + addr.slice(-4) : "";
@@ -81,7 +141,6 @@ export default function Navbar() {
             {link.label}
           </Link>
         ))}
-        {/* Profile only shows when wallet is connected */}
         {connected && account && (
           <Link
             href={`/profile/${account.address.toString()}`}
